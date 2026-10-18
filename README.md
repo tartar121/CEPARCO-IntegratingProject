@@ -6,6 +6,12 @@
 
 ---
 
+# Project Proposal Google Drive Link
+https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing
+
+---
+
+
 ## Introduction
 
 K-means clustering sorts a set of points into `K` groups. Each group has a center called a **centroid**, and every point belongs to the group of its nearest centroid. The algorithm repeats two steps until the centroids stop moving:
