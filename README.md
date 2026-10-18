@@ -7,7 +7,7 @@
 ---
 
 # Project Proposal Google Drive Link
-https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing
+- **Video Pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)
 
 ---
 
@@ -307,21 +307,12 @@ _TODO: add after the program runs._
 
 ---
 
-## Video Demonstration
-
-- **Proposal pitch (5-8 min):** _TODO: add the YouTube or Drive link._
-
----
-
 ## Project Files
 
 | File | Description |
 | :--- | :--- |
-| `docs/Proposal` | Project proposal document |
-| `src/main.c` | C driver: data generation, C baseline, correctness check, timing |
-| `src/xmm.asm` | x86-64 NASM kernel, assignment step with XMM registers |
-| `src/ymm.asm` | x86-64 NASM kernel, assignment step with YMM registers |
-| `KMeans.sln` | Visual Studio solution |
+| `CEPARCO_Group2_ProjectProposal.pdf` | Project proposal document |
+| `CEPARCO_Group2_ProposalSlides.pdf` | Slide deck for the video presentation |
 | `README.md` | This file |
 
 _TODO: update this table to match the real files._
