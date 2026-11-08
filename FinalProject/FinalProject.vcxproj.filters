@@ -20,9 +20,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="asmfunc.asm">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
     <CustomBuild Include="xmm.asm">
       <Filter>Source Files</Filter>
     </CustomBuild>
