@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <stdint.h>
 #include <windows.h>
+#include "kmeans.h"
 
 // gaussian generator parameters
 #define PI 3.14159265358979323846
@@ -16,25 +17,6 @@ typedef enum {
     EMPTY_POLICY_A = 0,
     EMPTY_POLICY_B = 1
 } EmptyPolicy;
-
-// internal inputs
-typedef struct {
-    //arrays
-    float *X;
-    float *Y;
-
-    //points and clusters
-    int N;
-    int K;
-
-    //parameters
-    int MAX_ITER;
-    float TOL;
-    unsigned int SEED;
-    EmptyPolicy EMPTY_POLICY;
-    int FIXED_ITERS;
-
-} KMeansData;
 
 
 // asm test cases
@@ -53,6 +35,8 @@ void generate_data(KMeansData* data); //guassian blob coords
 void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y); //centroids for X and Y
 double get_time(void); //used QueryPerformanceFrequency
 double benchmark(void (*function)(void), int runs); //benchmark N runs
+
+DWORD_PTR pin_core(DWORD core); //pinned core
 
 int main(void) {
     //fill with temp values for now
@@ -126,7 +110,7 @@ int main(void) {
             i, data.X[i], data.Y[i]);
     }
 
-    // initial centroids
+    //initial centroids
     printf("\nInitial Centroids:\n");
 
     for (int i = 0; i < data.K; i++) {
@@ -136,14 +120,91 @@ int main(void) {
     printf("--------------------------------------\n\n");
 
 
-    // test asm
+    printf("--------------------------------------\n");
+
+    //pin thread to core 0
+    printf("5. Pinning thread to CPU Core 0\n");
+    DWORD_PTR old_affinity = pin_core(0);
+
+    if (old_affinity == 0) {
+        printf("Failed to pin.\n");
+        return 1;
+    }
+    printf("Successfully pinned.\n");
+    printf("--------------------------------------\n\n");
+
+
+	//allocate labels for clusters
+    int* labels = (int*)malloc(data.N * sizeof(int)); 
+    if (labels == NULL) {
+        printf("Label allocation failed.\n");
+
+        free(centroid_X);
+        free(centroid_Y);
+        free_arrays(&data);
+
+        return 1;
+    }
+
+    //k means clustering
+    printf("--------------------------------------\n");
+    printf("6. Sequential C K-Means\n");
+
+    int result = kmeans(&data, centroid_X, centroid_Y, labels);
+
+    if (!result) {
+        printf("K-means failed.\n");
+
+        free(labels);
+        free(centroid_X);
+        free(centroid_Y);
+        free_arrays(&data);
+
+        return 1;
+    }
+
+    //print first 10 labels
+    for (int i = 0; i < 10 && i < data.N; i++) {
+        printf("Point %d : Cluster %d\n", i, labels[i]);
+    }
+    printf("--------------------------------------\n\n");
+
+
+    // update centroid positions
+    if (!update_centroids(&data, labels, centroid_X, centroid_Y)) {
+        printf("Centroid update failed.\n");
+
+        free(labels);
+        free(centroid_X);
+        free(centroid_Y);
+        free_arrays(&data);
+
+        return 1;
+    }
+
+    //updated centroids
+    printf("--------------------------------------\n");
+    printf("7.Updated Centroids\n");
+
+    for (int i = 0; i < data.K; i++) {
+        printf("Centroid %d: X = %.2f, Y = %.2f\n",
+            i, centroid_X[i], centroid_Y[i]);
+    }
+    printf("--------------------------------------\n\n");
+
+
+    //test asm
     xmmkernel();
     ymmkernel();
 
 
+    //free memory
     free(centroid_X);
     free(centroid_Y);
     free_arrays(&data);
+
+	SetThreadAffinityMask(GetCurrentThread(), old_affinity); //restore old cpu affinity
+
     return 0;
 }
 
@@ -254,7 +315,7 @@ void random_pair(double* num1, double* num2) {
     double u1 = random_float();
     double u2 = random_float();
 
-    double radius = sqrt(-2.0 * log(u1)); //
+    double radius = sqrt(-2.0 * log(u1));
     double angle = 2.0 * PI * u2;
 
     *num1 = radius * cos(angle);
@@ -325,4 +386,22 @@ double benchmark(void (*function)(void), int runs) {
     }
     return total_time / runs;
 }
+
+//pin thread to specific core
+DWORD_PTR pin_core(DWORD core) {
+
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+
+    if (core >= system_info.dwNumberOfProcessors) {
+        printf("Invalid core number.\n");
+        return 0;
+    }
+
+	DWORD_PTR mask = ((DWORD_PTR)1 << core);
+	return SetThreadAffinityMask(GetCurrentThread(), mask);
+}
+
+
+
 
