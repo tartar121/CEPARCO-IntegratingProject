@@ -41,7 +41,7 @@ int assign_c(const KMeansData* data, const float* centroid_X,
 //FIXED_ITERS > 0: timing mode, runs exactly FIXED_ITERS iterations, no convergence check
 //FIXED_ITERS == 0: correctness mode, stops when max centroid movement <= TOL or at MAX_ITER
 int kmeans(const KMeansData* data, AssignFn assign, float* centroid_X, float* centroid_Y,
-    int* labels, float* min_d2, ClusterSums* sums, KMeansResult* result) {
+    int* labels, float* min_d2, ClusterSums* sums, KMeansResult* result, int policy) {
 
     //validate all inputs
     if (data == NULL || data->X == NULL || data->Y == NULL || assign == NULL ||
@@ -68,8 +68,8 @@ int kmeans(const KMeansData* data, AssignFn assign, float* centroid_X, float* ce
 
         //update step (movement is only measured when it will be checked)
         double max_move = 0.0;
-        int empty = update_centroids(data, labels, centroid_X, centroid_Y,
-            sums, fixed_mode ? NULL : &max_move);
+        int empty = update_centroids(data, labels, min_d2, centroid_X, centroid_Y,
+            sums, fixed_mode ? NULL : &max_move, policy);
         if (empty < 0) {
             return 0;
         }
