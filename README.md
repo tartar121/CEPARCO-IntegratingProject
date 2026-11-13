@@ -1,7 +1,6 @@
-# CEPARCO Integrating Project: Register-Width For K-Means Clustering With SIMD
-
+# CEPARCO Integrating Project
+## Performance Study of Register-Width for K-Means Clustering: Scalar C versus XMM and YMM SIMD Implementations 
 **1st Term AY 2026-2027 | S01 Group 2**
-
 
 ---
 
@@ -122,12 +121,13 @@ _TODO: add after the program runs._
 ## AI Usage Declaration and Acknowledgements
 
 - **Kernels:** `xmm.asm` and `ymm.asm` were written by Daniel Jedrick Dabuit. They are adapted from the kernels of our earlier CEPARCO SIMD project ([xmm.asm](https://github.com/ethanndaniel/CEPARCO-SIMD/blob/master/FinalProject/xmm.asm), [ymm.asm](https://github.com/ethanndaniel/CEPARCO-SIMD/blob/master/FinalProject/ymm.asm)): the NASM layout, Win64 calling convention, and register handling come from that project, and the k-means assignment logic (distance, compare-and-blend minimum, label and smallest-distance stores, leftover handling) was written for this project.
-- **Other code:** Policy B (empty-cluster relocation) was written by [name]. The scalar C baseline, test code, timing harness, and bandwidth test were written by [name(s)].
+- **Who wrote what:**
+  - Ethan Daniel B. Magbatoc: project setup, input validation, array allocation, Gaussian data generation, and the first scalar C k-means with core pinning.
+  - Jose Bryan L. Perez: Policy B (empty-cluster relocation) in `kmeans.c`.
+  - Daniel Jedrick C. Dabuit: the XMM and YMM kernels and their C wrappers (`assign_xmm`, `assign_ymm`).
+  - Tara Ysabel P. Uy: the double-precision centroid update with `ClusterSums`, the k-means loop with the function-pointer assignment step, inertia, the known-answer tests, the xorshift32 PRNG, the timing harness, the bandwidth test, the build and signature fixes.
 - **Prior work:** the centroid-oriented design (compare a group of points with one centroid at a time) follows Al Hasib et al. [7]. Lloyd [1], Hamerly [6], and Nielsen and Nock [9] are cited in the proposal below.
-- **AI tools used:** Claude (Anthropic) was used for code review and suggestions (including adding `vzeroupper` to `ymm.asm` and fixing a `kmeans()` signature mismatch), for the timing harness, the xorshift32 PRNG, the memory-bandwidth test, and for editing this README. ChatGPT was used for [what it was used for]. [Kernel authorship and AI: Dan to confirm whether AI was used on the kernels.]
-- Each member's AI use (date, tool, what was asked, what was used) is logged in `docs/AI_USAGE.md`.
-
-_TODO: add `docs/AI_USAGE.md` and fill in the bracketed names._
+- **AI tools used:** Claude (Anthropic) was used for code review and suggestions for the timing harness, the xorshift32 PRNG, and the memory-bandwidth test. ChatGPT was used for [what it was used for]. [Kernel authorship and AI: Dan to confirm whether AI was used on the kernels.]
 
 ---
 
@@ -135,8 +135,8 @@ _TODO: add `docs/AI_USAGE.md` and fill in the bracketed names._
 
 _This is the revised proposal that was submitted to our professor (`CEPARCO_Group2_ProjectProposalRevised.pdf`)._
 
-## Project Proposal Video Pitch
-- **Video pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)
+## Project Proposal Video Pitch (OLD)
+- ~~**Video pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)~~
 
 ---
 
