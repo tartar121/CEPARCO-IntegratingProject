@@ -195,12 +195,12 @@ int update_centroids(const KMeansData* data, const int* labels, float* min_d2, f
     }
     // Policy B
     if (policy == 1 && empty > 0) {
-        
+
         int prev_index = -1;
         float prev_d2 = 0.0f;
 
         for (int j = 0; j < data->K; j++) {
-            
+
             // Verification for an empty cluster
             if (sums->count[j] > 0) {
                 continue;
@@ -208,24 +208,24 @@ int update_centroids(const KMeansData* data, const int* labels, float* min_d2, f
 
             int max_idx = -1;
             float max_d2 = 0.0f;
-                for (int i = 0; i < data->N; i++) {
-                    float d2 = min_d2[i];
-                    
-                    // Skip used points
-                    if (prev_index >= 0 && !(d2 < prev_d2 || (d2 == prev_d2 && i > prev_index)))
-                        continue;
-                    // Checks for the max and assign index
-                    if (max_idx < 0 || d2 > max_d2) {
-                        max_idx = i;
-                        max_d2 = d2;
-                    }
+            for (int i = 0; i < data->N; i++) {
+                float d2 = min_d2[i];
+
+                // Skip used points
+                if (prev_index >= 0 && !(d2 < prev_d2 || (d2 == prev_d2 && i > prev_index)))
+                    continue;
+                // Checks for the max and assign index
+                if (max_idx < 0 || d2 > max_d2) {
+                    max_idx = i;
+                    max_d2 = d2;
                 }
+            }
 
             if (max_move != NULL) {
-               double dx = (double)data->X[max_idx] - (double)centroid_X[j];
-               double dy = (double)data->Y[max_idx] - (double)centroid_Y[j];
-               double d = sqrt(dx * dx + dy * dy);
-               if (d > move) move = d;
+                double dx = (double)data->X[max_idx] - (double)centroid_X[j];
+                double dy = (double)data->Y[max_idx] - (double)centroid_Y[j];
+                double d = sqrt(dx * dx + dy * dy);
+                if (d > move) move = d;
             }
             // Assign centroid value
             centroid_X[j] = data->X[max_idx];
@@ -234,7 +234,7 @@ int update_centroids(const KMeansData* data, const int* labels, float* min_d2, f
             prev_index = max_idx;
             prev_d2 = max_d2;
         }
-  
+
     }
 
     if (max_move != NULL) *max_move = move;
@@ -244,9 +244,7 @@ int update_centroids(const KMeansData* data, const int* labels, float* min_d2, f
 
 
 //=====================================================================
-//[ADDED] XMM (AVX-128) assignment step
-//Everything above this line is unchanged. Everything below is new.
-//The asm kernel lives in xmm.asm (below the printf stub, NASM, win64).
+// XMM (AVX-128) assignment step
 //Call direction: C (assign_xmm) calls asm (xmm_assign_kernel), and the asm
 //calls back into C (assign_tail_c) for the N % 4 leftover points.
 //=====================================================================
@@ -322,7 +320,7 @@ int xmm_vs_c_check(const KMeansData* data, const int* c_labels,
         cy[j] = data->Y[j];
     }
 
-    if (!kmeans(data, assign_xmm, cx, cy, labels, d2, sums, &r)) {
+    if (!kmeans(data, assign_xmm, cx, cy, labels, d2, sums, &r, data->EMPTY_POLICY)) {
         printf("XMM k-means failed.\n");
         goto done;
     }
@@ -353,6 +351,103 @@ int xmm_vs_c_check(const KMeansData* data, const int* c_labels,
     printf("Max centroid difference: %g\n", max_diff);
     printf("Inertia: C = %.4f, XMM = %.4f\n", c_result->inertia, r.inertia);
     printf("XMM validity: %s\n", (mismatches == 0) ? "PASS" : "FAIL");
+
+    ok = (mismatches == 0);
+
+done:
+    printf("--------------------------------------\n\n");
+    free(cx);
+    free(cy);
+    _aligned_free(labels);
+    _aligned_free(d2);
+    return ok;
+}
+
+//=====================================================================
+// YMM (AVX-256) assignment step
+// The asm kernel lives in ymm.asm (below the printf stub, NASM, win64).
+// Call direction: C (assign_ymm) calls asm (ymm_assign_kernel), and the asm
+// calls back into C (assign_tail_c) for the N % 8 leftover points.
+//=====================================================================
+
+// asm kernel in ymm.asm: processes floor(N/8)*8 points, 8 per step,
+// then calls assign_tail_c (above) for the leftover points
+extern void ymm_assign_kernel(const float* X, const float* Y,
+    const float* cx, const float* cy,
+    int* labels, float* min_d2, int N, int K);
+
+// YMM assignment step (same AssignFn signature as assign_c).
+// C calls the asm; the asm does the vector part and calls assign_tail_c for the leftover.
+int assign_ymm(const KMeansData* data, const float* centroid_X,
+    const float* centroid_Y, int* labels, float* min_d2) {
+
+    if (data == NULL || data->K < 1) {
+        return 0;
+    }
+
+    ymm_assign_kernel(data->X, data->Y, centroid_X, centroid_Y, labels, min_d2, data->N, data->K);
+
+    return 1;
+}
+
+// YMM vs C correctness check (uses its own buffers, leaves the C results untouched)
+// returns 1 if the labels match exactly, 0 otherwise (or on error)
+int ymm_vs_c_check(const KMeansData* data, const int* c_labels,
+    const float* c_centroid_X, const float* c_centroid_Y,
+    const KMeansResult* c_result, ClusterSums* sums) {
+
+    int ok = 0;
+    float* cx = (float*)malloc(data->K * sizeof(float));
+    float* cy = (float*)malloc(data->K * sizeof(float));
+    int* labels = (int*)_aligned_malloc(data->N * sizeof(int), 32);
+    float* d2 = (float*)_aligned_malloc(data->N * sizeof(float), 32);
+    KMeansResult r = { 0 };
+
+    printf("--------------------------------------\n");
+    printf("YMM K-Means vs C\n");
+
+    if (cx == NULL || cy == NULL || labels == NULL || d2 == NULL) {
+        printf("YMM buffer allocation failed.\n");
+        goto done;
+    }
+
+    //same starting centroids as the C run: first K points
+    for (int j = 0; j < data->K; j++) {
+        cx[j] = data->X[j];
+        cy[j] = data->Y[j];
+    }
+
+    if (!kmeans(data, assign_ymm, cx, cy, labels, d2, sums, &r, data->EMPTY_POLICY)) {
+        printf("YMM k-means failed.\n");
+        goto done;
+    }
+
+    if (!compute_inertia(data, assign_ymm, cx, cy, labels, d2, &r.inertia)) {
+        printf("YMM inertia failed.\n");
+        goto done;
+    }
+
+    //label match
+    int mismatches = 0;
+    for (int i = 0; i < data->N; i++) {
+        if (labels[i] != c_labels[i]) mismatches++;
+    }
+
+    //largest centroid difference
+    double max_diff = 0.0;
+    for (int j = 0; j < data->K; j++) {
+        double ddx = fabs((double)cx[j] - (double)c_centroid_X[j]);
+        double ddy = fabs((double)cy[j] - (double)c_centroid_Y[j]);
+        if (ddx > max_diff) max_diff = ddx;
+        if (ddy > max_diff) max_diff = ddy;
+    }
+
+    printf("Iterations: C = %d, YMM = %d\n", c_result->iterations, r.iterations);
+    printf("Label mismatches vs C: %d of %d (match %.4f%%)\n",
+        mismatches, data->N, 100.0 * (data->N - mismatches) / data->N);
+    printf("Max centroid difference: %g\n", max_diff);
+    printf("Inertia: C = %.4f, YMM = %.4f\n", c_result->inertia, r.inertia);
+    printf("YMM validity: %s\n", (mismatches == 0) ? "PASS" : "FAIL");
 
     ok = (mismatches == 0);
 

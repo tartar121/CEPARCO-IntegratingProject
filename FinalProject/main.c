@@ -64,7 +64,7 @@ static void run_tests(void) {
         ClusterSums sums;
         KMeansResult r;
         cluster_sums_init(d.K, &sums);
-        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r, d.EMPTY_POLICY);
         compute_inertia(&d, assign_c, cx, cy, labels, d2, &r.inertia);
         cluster_sums_free(&sums);
 
@@ -92,7 +92,7 @@ static void run_tests(void) {
         ClusterSums sums;
         KMeansResult r;
         cluster_sums_init(d.K, &sums);
-        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r, d.EMPTY_POLICY);
         cluster_sums_free(&sums);
 
         int all_zero = 1;
@@ -119,7 +119,7 @@ static void run_tests(void) {
         ClusterSums sums;
         KMeansResult r;
         cluster_sums_init(d.K, &sums);
-        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r, d.EMPTY_POLICY);
         cluster_sums_free(&sums);
 
         int ok = run_ok && r.iterations == 10 && r.converged == 0;
@@ -248,7 +248,7 @@ int main(void) {
     printf("--------------------------------------\n");
     printf("6. Sequential C K-Means\n");
 
-    if (!kmeans(&data, assign_c, centroid_X, centroid_Y, labels, min_d2, &sums, &result)) {
+    if (!kmeans(&data, assign_c, centroid_X, centroid_Y, labels, min_d2, &sums, &result, data.EMPTY_POLICY)) {
         printf("K-means failed.\n");
         goto cleanup;
     }
@@ -323,12 +323,16 @@ int main(void) {
         printf("--------------------------------------\n\n");
     }
 
+    // Test asm 
+
     // XMM vs C check (assign_xmm / xmm_vs_c_check live in kmeans.c)
     xmm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
 
-    //test asm
+    // YMM vs C check (assign_ymm / ymm_vs_c_check live in kmeans.c)
+    ymm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
+
     // xmmkernel();
-    ymmkernel();
+    // ymmkernel();
 
     exit_code = 0;
 
@@ -546,7 +550,7 @@ int benchmark_kmeans(const KMeansData* data, AssignFn assign,
     //warm-up run (not timed)
     //loads caches and touches every page
     initialize_centroids(data, centroid_X, centroid_Y);
-    if (!kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result)) {
+    if (!kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result, data->EMPTY_POLICY)) {
         free(times);
         return 0;
     }
@@ -557,7 +561,7 @@ int benchmark_kmeans(const KMeansData* data, AssignFn assign,
 
         LARGE_INTEGER start, end;
         QueryPerformanceCounter(&start);
-        int ok = kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result);
+        int ok = kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result, data->EMPTY_POLICY);
         QueryPerformanceCounter(&end);
 
         if (!ok) {
