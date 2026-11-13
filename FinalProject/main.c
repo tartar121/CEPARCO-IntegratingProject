@@ -17,7 +17,7 @@
 void xmmkernel(void);
 void ymmkernel(void);
 
-int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps);
+
 int validate_data(const KMeansData* data); //validate input data
 int allocate_arrays(KMeansData* data); //validate X[] and Y[]
 void free_arrays(KMeansData* data); //free X[] and Y[]
@@ -478,58 +478,4 @@ DWORD_PTR pin_core(DWORD core) {
 
     DWORD_PTR mask = ((DWORD_PTR)1 << core);
     return SetThreadAffinityMask(GetCurrentThread(), mask);
-}
-
-//single-thread copy bandwidth (GB/s)
-//counts read + write bytes (STREAM-style)
-//bytes must be much larger than the last-level cache (e.g. 256 MB)
-int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps) {
-
-    if (best_gbps == NULL || mean_gbps == NULL || runs < 1 || bytes == 0) {
-        return 0;
-    }
-
-    char* src = (char*)_aligned_malloc(bytes, 32);
-    char* dst = (char*)_aligned_malloc(bytes, 32);
-
-    if (src == NULL || dst == NULL) {
-        _aligned_free(src);
-        _aligned_free(dst);
-        return 0;
-    }
-
-    //touch both buffers once so page faults are not measured
-    memset(src, 1, bytes);
-    memset(dst, 0, bytes);
-
-    //warm-up copy (not timed)
-    memcpy(dst, src, bytes);
-
-    double best = 0.0;
-    double total = 0.0;
-
-    for (int r = 0; r < runs; r++) {
-
-        LARGE_INTEGER start, end;
-        QueryPerformanceCounter(&start);
-        memcpy(dst, src, bytes);
-        QueryPerformanceCounter(&end);
-
-        double seconds = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick / 1000.0;
-        double gbps = (2.0 * (double)bytes) / seconds / 1e9; //read + write
-
-        total += gbps;
-        if (gbps > best) best = gbps;
-    }
-
-    //read one byte back so the copies cannot be optimized away
-    volatile char sink = dst[bytes - 1];
-    (void)sink;
-
-    *best_gbps = best;
-    *mean_gbps = total / runs;
-
-    _aligned_free(src);
-    _aligned_free(dst);
-    return 1;
 }
