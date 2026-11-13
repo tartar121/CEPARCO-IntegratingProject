@@ -2,12 +2,141 @@
 
 **1st Term AY 2026-2027 | S01 Group 2**
 
-> **Status:** Milestone #2 (mid-project update). This README follows the **revised** project proposal (`CEPARCO_Group2_ProjectProposalRevised.pdf`). The scalar C baseline, empty-cluster Policies A and B, and the XMM and YMM assignment kernels are implemented and match the scalar C results on the validation dataset. Full benchmarks and the auto-vectorized C build are not done yet. Sections marked `TODO` are filled in as results come in.
 
 ---
 
-# Project Proposal Google Drive Link
-- **Video Pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)
+# Milestone #2: Project Update (Week 10)
+
+**Demo video:** _TODO: paste the video link here_
+
+> **Status:** The scalar C baseline, empty-cluster Policies A and B, and the XMM and YMM assignment kernels are implemented, and both SIMD versions match the scalar C results on the validation dataset. Timing of XMM / YMM, the auto-vectorized C build, and the full benchmarks are not done yet. This update follows the revised proposal below (`CEPARCO_Group2_ProjectProposalRevised.pdf`).
+
+## Where We Are
+
+| Component | Status | Notes |
+| :--- | :-: | :--- |
+| Data generator | Done | Own xorshift32 + Box-Muller, so one `SEED` gives the same data with any compiler |
+| Timing harness | Done | `QueryPerformanceCounter`, 1 warm-up + 30 runs: mean, median, standard deviation, minimum; fixed-iteration mode |
+| Memory-bandwidth copy test | Done | Single-thread 256 MB copy; the ceiling will be recorded on the benchmark machine |
+| Scalar C baseline | Done | Vectorizer off with `#pragma loop(no_vector)`; Release listing checked: scalar instructions only, no FMA |
+| Policies A and B | Done | Both in C; Test 2 (Policy A) and Test 4 (Policy B) pass; the five-point example from [9] is TODO |
+| XMM kernel (128-bit) | Working | 0 label mismatches vs scalar C at `N = 1024`; boundary sizes and Policy B checks TODO |
+| YMM kernel (256-bit) | Working (initial) | 0 label mismatches vs scalar C at `N = 1024`; `vzeroupper` added; boundary sizes and Policy B checks TODO |
+| Auto-vectorized C build | TODO | Separate build with `/arch:AVX2`, plus FMA check on the disassembly |
+| XMM / YMM timing and speedups | TODO | Whole run and assignment-only |
+| Full `N` and `K` sweep | TODO | Week 13 |
+
+## Results So Far
+
+Release x64, `N = 1024`, `K = 4`, `SEED = 67`, Policy A:
+
+```text
+Test 1 (hand-worked example, converges): PASS
+Test 2 (duplicate points / empty clusters): PASS
+Test 3 (fixed iterations): PASS
+Test 4 (Policy B relocation): PASS
+
+XMM K-Means vs C
+Label mismatches vs C: 0 of 1024 (match 100.0000%)
+Max centroid difference: 0
+Inertia: C = 199666.0206, XMM = 199666.0206
+XMM validity: PASS
+
+YMM K-Means vs C
+Label mismatches vs C: 0 of 1024 (match 100.0000%)
+Max centroid difference: 0
+Inertia: C = 199666.0206, YMM = 199666.0206
+YMM validity: PASS
+```
+
+**Timing:** _TODO._ Runs at `N = 1024` are too short and too noisy to report. Speedups will be measured at the planned sizes on one machine under the controlled protocol in the proposal below.
+
+## Implementation Notes (current code)
+
+- **One shared loop.** The assignment step is passed to `kmeans()` as a function pointer (`assign_c`, `assign_xmm`, `assign_ymm`, one signature). The centroid update, convergence check, and empty-cluster handling are shared C code, so only the assignment step differs between versions.
+- **Two modes.** `FIXED_ITERS > 0` is timing mode: exactly `FIXED_ITERS` iterations, no convergence check (`TOL = 0`). `FIXED_ITERS == 0` is correctness mode: stops when the largest centroid movement is `<= TOL` or at `MAX_ITER`. `FIXED_ITERS = 100` is our own choice for timing runs (the proposal does not fix a number); every version uses the same value, and it may be lowered for the largest sizes, in which case the value is reported with the results.
+- **Double-precision sums.** Per-cluster sums are accumulated in `double`, in buffers allocated once (`ClusterSums`), so the sums stay accurate for large `N`.
+- **Reproducible data.** The dataset comes from our own xorshift32 generator plus Box-Muller (not `rand()`), so one `SEED` gives the same points with any compiler. Currently `SEED = 67`.
+- **Policy B rules as implemented.** An empty cluster has a count of 0 after the update step. Empty clusters, in ascending index order, each take the farthest not-yet-used point using the smallest squared distances stored by the assignment step that just ran; ties go to the lowest point index. Only the centroid moves (labels, sums, and counts are unchanged), and the jump counts toward the convergence movement.
+- **Final inertia.** Computed outside the timed region by one extra assignment pass with the final centroids, then summing the stored smallest squared distances in `double`.
+- **Leftover points.** The kernels process full blocks of 4 (XMM) or 8 (YMM) points and call the scalar C function `assign_tail_c` for the remaining `N % 4` or `N % 8` points. The YMM kernel executes `vzeroupper` before that call and before returning, to avoid AVX / SSE transition penalties.
+- **Timed region (current).** Only `kmeans()` is inside the timer. Data generation, initial centroids, the inertia pass, and printing are outside it. Per-stage and assignment-only timing are TODO.
+- **Input.** The dataset is generated internally from `SEED`; reading points from a file is not implemented yet.
+
+## How to Compile
+
+### Visual Studio (Windows, x64)
+
+1. Open `FinalProject.sln` in Visual Studio 2022 (platform toolset **v143**).
+2. Choose **x64**, then **Release** (primary, used for all timings) or **Debug** (secondary).
+3. NASM assembles `xmm.asm` and `ymm.asm` through a custom build step (`nasm -f win64`) that is set for both Debug|x64 and Release|x64. The project expects NASM at `C:\nasm\nasm.exe`; change the path in the Custom Build Tool settings if it is installed elsewhere.
+4. Build and run.
+
+The scalar baseline uses `#pragma loop(no_vector)`, which is MSVC-specific, so the project is built with Visual Studio. A GCC command-line build has not been set up or tested.
+
+**Requirements:** NASM, Visual Studio 2022 (MSVC v143), Windows x64, and a CPU that supports SSE and AVX2.
+
+## How to Run
+
+Build in **Release | x64** and run (Ctrl+F5 in Visual Studio, or `x64\Release\FinalProject.exe`).
+
+The program currently:
+1. Runs the known-answer tests (hand-worked example, duplicate points / empty clusters, fixed iterations, Policy B relocation)
+2. Validates the inputs and generates the Gaussian-blob dataset from `SEED`
+3. Pins the thread to one core
+4. Runs scalar C k-means and prints iterations, convergence, empty-cluster events, inertia and the final centroids
+5. Times scalar C in fixed-iteration mode (1 warm-up run + 30 timed runs: mean, median, standard deviation, minimum)
+6. Measures single-thread memory-copy bandwidth
+7. Runs the XMM and YMM versions on the same data and checks them against scalar C (label match, largest centroid difference, inertia, PASS/FAIL)
+
+_TODO: sweep over the planned `N` and `K`, XMM / YMM / auto-vectorized C timing, and per-stage timing._
+
+## Week 10 Checklist
+
+**Mid-project (Week 10) target**
+- [x] Data generator and timing code completed, including fixed-iteration mode, aligned memory, and the timing harness (warm-up, 30 runs, mean / median / standard deviation / minimum). Thread pinning works; the final core is still to be chosen.
+- [x] Sequential scalar C K-means completed with compiler vectorization disabled and verified on a small hand-worked example.
+- [x] Empty-cluster Policies A and B implemented in C. Verified on the duplicate-point dataset; the five-point example from [9] is still TODO.
+- [x] Memory-bandwidth copy test completed.
+- [x] XMM assignment kernel working and producing the same labels as the C version (checked at `N = 1024`).
+- [x] YMM kernel started; the initial version already passes the same check at `N = 1024`.
+- [ ] Preliminary C versus XMM timing results.
+
+**Still to do for Week 13:** the items under "Final (Week 13) target" in the proposal's Milestones section below.
+
+## Program Output Screenshot
+
+_TODO: add after the program runs._
+
+## Project Files
+
+| File | Description |
+| :--- | :--- |
+| `FinalProject.sln`, `FinalProject/` | Visual Studio solution and project |
+| `FinalProject/main.c` | Known-answer tests, input validation, data generation, timing harness, bandwidth test, driver |
+| `FinalProject/kmeans.c`, `kmeans.h` | Scalar C k-means, update step, empty-cluster Policies A and B, inertia, XMM / YMM wrappers and checks |
+| `FinalProject/xmm.asm`, `ymm.asm` | NASM assignment kernels (128-bit and 256-bit) |
+| `Project Proposal Files/` | Original proposal, revised proposal, and proposal slides (PDF) |
+| `README.md` | This file |
+
+## AI Usage Declaration and Acknowledgements
+
+- **Kernels:** `xmm.asm` and `ymm.asm` were written by Daniel Jedrick Dabuit. They are adapted from the kernels of our earlier CEPARCO SIMD project ([xmm.asm](https://github.com/ethanndaniel/CEPARCO-SIMD/blob/master/FinalProject/xmm.asm), [ymm.asm](https://github.com/ethanndaniel/CEPARCO-SIMD/blob/master/FinalProject/ymm.asm)): the NASM layout, Win64 calling convention, and register handling come from that project, and the k-means assignment logic (distance, compare-and-blend minimum, label and smallest-distance stores, leftover handling) was written for this project.
+- **Other code:** Policy B (empty-cluster relocation) was written by [name]. The scalar C baseline, test code, timing harness, and bandwidth test were written by [name(s)].
+- **Prior work:** the centroid-oriented design (compare a group of points with one centroid at a time) follows Al Hasib et al. [7]. Lloyd [1], Hamerly [6], and Nielsen and Nock [9] are cited in the proposal below.
+- **AI tools used:** Claude (Anthropic) was used for code review and suggestions (including adding `vzeroupper` to `ymm.asm` and fixing a `kmeans()` signature mismatch), for the timing harness, the xorshift32 PRNG, the memory-bandwidth test, and for editing this README. ChatGPT was used for [what it was used for]. [Kernel authorship and AI: Dan to confirm whether AI was used on the kernels.]
+- Each member's AI use (date, tool, what was asked, what was used) is logged in `docs/AI_USAGE.md`.
+
+_TODO: add `docs/AI_USAGE.md` and fill in the bracketed names._
+
+---
+
+# Project Proposal (Revised)
+
+_This is the revised proposal that was submitted to our professor (`CEPARCO_Group2_ProjectProposalRevised.pdf`)._
+
+## Project Proposal Video Pitch
+- **Video pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)
 
 ---
 
@@ -15,6 +144,8 @@
 This project investigates how SIMD register-width optimization techniques affect the performance of K-means clustering on an x86-64 CPU. It compares four implementations: scalar C as the baseline, compiler auto-vectorized C, an SSE XMM-register kernel (128-bit, four single-precision values per instruction), and an AVX2 YMM-register kernel (256-bit, eight values per instruction).
 
 All versions use identical datasets, initial centroids, parameters, and empty-cluster handling rules to ensure a controlled comparison. Experiments vary the number of data points (`N`), the number of clusters (`K`), and the implementation to investigate how workload size and computational demand affect performance. The results will show the benefits and limitations of wider SIMD registers and loop optimizations for K-means clustering on the CPU.
+
+---
 
 ## Introduction
 
@@ -106,7 +237,7 @@ x, y
 ...
 ```
 
-For benchmarking, the program generates synthetic Gaussian blobs using a fixed seed (`SEED`) so every implementation receives identical data. The initial centroids are the first `K` points in the array. _(The current program generates its dataset internally; reading points from a file is not implemented.)_
+For benchmarking, the program generates synthetic Gaussian blobs using a fixed seed (`SEED`) so every implementation receives identical data. The initial centroids are the first `K` points in the array.
 
 **Input rules:**
 - `X[]` and `Y[]` must have the same length.
@@ -178,40 +309,6 @@ The run is timed in four parts:
 | Centroid recomputation | Summing the points of each cluster and dividing to get the new centroids | C (ASM if time permits) |
 | Full runtime and accuracy check | Whole run, plus comparing the results with the C version | C |
 
-_Current harness: times `kmeans()` as a whole in fixed-iteration mode. Per-stage timing and assignment-only timing are TODO._
-
----
-
-## How to Compile
-
-### Visual Studio (Windows, x64)
-
-1. Open `FinalProject.sln` in Visual Studio 2022 (platform toolset **v143**).
-2. Choose **x64**, then **Release** (primary, used for all timings) or **Debug** (secondary).
-3. NASM assembles `xmm.asm` and `ymm.asm` through a custom build step (`nasm -f win64`) that is set for both Debug|x64 and Release|x64. The project expects NASM at `C:\nasm\nasm.exe`; change the path in the Custom Build Tool settings if it is installed elsewhere.
-4. Build and run.
-
-The scalar baseline uses `#pragma loop(no_vector)`, which is MSVC-specific, so the project is built with Visual Studio. A GCC command-line build has not been set up or tested.
-
-**Requirements:** NASM, Visual Studio 2022 (MSVC v143), Windows x64, and a CPU that supports SSE and AVX2.
-
----
-
-## How to Run
-
-Build in **Release | x64** and run (Ctrl+F5 in Visual Studio, or `x64\Release\FinalProject.exe`).
-
-The program currently:
-1. Runs the known-answer tests (hand-worked example, duplicate points / empty clusters, fixed iterations, Policy B relocation)
-2. Validates the inputs and generates the Gaussian-blob dataset from `SEED`
-3. Pins the thread to one core
-4. Runs scalar C k-means and prints iterations, convergence, empty-cluster events, inertia and the final centroids
-5. Times scalar C in fixed-iteration mode (1 warm-up run + 30 timed runs: mean, median, standard deviation, minimum)
-6. Measures single-thread memory-copy bandwidth
-7. Runs the XMM and YMM versions on the same data and checks them against scalar C (label match, largest centroid difference, inertia, PASS/FAIL)
-
-_TODO: sweep over the planned `N` and `K`, XMM / YMM / auto-vectorized C timing, and per-stage timing._
-
 ---
 
 ## Correctness Check
@@ -238,23 +335,6 @@ Two datasets will force empty-cluster cases: (1) the five-point example describe
 
 
 **Result**
-
-**Current result** (Release, `N = 1024`, `K = 4`, Policy A): the four known-answer tests pass, and both XMM and YMM give 0 of 1024 label mismatches against scalar C (100%), a largest centroid difference of 0, and identical inertia (199666.0206).
-
-_TODO: the same checks at the boundary sizes `N = 7, 1003, 1005`, under Policy B, and the five-point example from Nielsen and Nock [9]._
-
----
-
-## Implementation Notes (current code)
-
-- **One shared loop.** The assignment step is passed to `kmeans()` as a function pointer (`assign_c`, `assign_xmm`, `assign_ymm`, one signature). The centroid update, convergence check, and empty-cluster handling are shared C code, so only the assignment step differs between versions.
-- **Two modes.** `FIXED_ITERS > 0` is timing mode: exactly `FIXED_ITERS` iterations, no convergence check (`TOL = 0`). `FIXED_ITERS == 0` is correctness mode: stops when the largest centroid movement is `<= TOL` or at `MAX_ITER`.
-- **Double-precision sums.** Per-cluster sums are accumulated in `double`, in buffers allocated once (`ClusterSums`), so the sums stay accurate for large `N`.
-- **Reproducible data.** The dataset comes from our own xorshift32 generator plus Box-Muller (not `rand()`), so one `SEED` gives the same points with any compiler. Currently `SEED = 67`.
-- **Policy B rules as implemented.** An empty cluster has a count of 0 after the update step. Empty clusters, in ascending index order, each take the farthest not-yet-used point using the smallest squared distances stored by the assignment step that just ran; ties go to the lowest point index. Only the centroid moves (labels, sums, and counts are unchanged), and the jump counts toward the convergence movement.
-- **Final inertia.** Computed outside the timed region by one extra assignment pass with the final centroids, then summing the stored smallest squared distances in `double`.
-- **Leftover points.** The kernels process full blocks of 4 (XMM) or 8 (YMM) points and call the scalar C function `assign_tail_c` for the remaining `N % 4` or `N % 8` points. The YMM kernel executes `vzeroupper` before that call and before returning, to avoid AVX / SSE transition penalties.
-- **Timed region (current).** Only `kmeans()` is inside the timer. Data generation, initial centroids, the inertia pass, and printing are outside it. Per-stage and assignment-only timing are TODO.
 
 ---
 
@@ -351,15 +431,6 @@ _TODO. Questions to answer once the results are in:_
 | #2 Mid-project update demo | 10 | See the list below |
 | #3 Complete submission and demo | 13 | Source code, discussion of the parallel algorithms, sequential vs parallel timing, optional paper |
 
-**Mid-project (Week 10) target**
-- [x] Data generator and timing code completed, including fixed-iteration mode, aligned memory, and the timing harness (warm-up, 30 runs, mean / median / standard deviation / minimum). Thread pinning works; the final core is still to be chosen.
-- [x] Sequential scalar C K-means completed with compiler vectorization disabled and verified on a small hand-worked example.
-- [x] Empty-cluster Policies A and B implemented in C. Verified on the duplicate-point dataset; the five-point example from [9] is still TODO.
-- [x] Memory-bandwidth copy test completed.
-- [x] XMM assignment kernel working and producing the same labels as the C version (checked at `N = 1024`).
-- [x] YMM kernel started; the initial version already passes the same check at `N = 1024`.
-- [ ] Preliminary C versus XMM timing results.
-
 **Final (Week 13) target**
 - [ ] YMM assignment kernel completed and verified.
 - [ ] Auto-vectorized C build compared against the hand-written kernels.
@@ -369,34 +440,6 @@ _TODO. Questions to answer once the results are in:_
 - [ ] Optional vectorized centroid update and optional CUDA version.
 - [ ] GitHub repository with source code, discussion of the parallel algorithms, and sequential-versus-parallel execution-time comparison.
 - [ ] Optional conference paper.
-
----
-
-## Program Output Screenshot
-
-_TODO: add after the program runs._
-
----
-
-## Project Files
-
-| File | Description |
-| :--- | :--- |
-| `FinalProject.sln`, `FinalProject/` | Visual Studio solution and project |
-| `FinalProject/main.c` | Known-answer tests, input validation, data generation, timing harness, bandwidth test, driver |
-| `FinalProject/kmeans.c`, `kmeans.h` | Scalar C k-means, update step, empty-cluster Policies A and B, inertia, XMM / YMM wrappers and checks |
-| `FinalProject/xmm.asm`, `ymm.asm` | NASM assignment kernels (128-bit and 256-bit) |
-| `Project Proposal Files/` | Original proposal, revised proposal, and proposal slides (PDF) |
-| `README.md` | This file |
-
----
-
-## AI Usage Declaration
-
-AI assistants were used during development. The full declaration (date, tool, what was asked, what was used) is the following:
-- placeholder
-
-_TODO: every member has to log/add their use._
 
 ---
 
