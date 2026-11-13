@@ -140,8 +140,8 @@ void cluster_sums_free(ClusterSums* sums) {
 
 //updates centroids based on current labels
 //returns the number of empty clusters (>= 0) or -1 on error
-int update_centroids(const KMeansData* data, const int* labels, float* centroid_X,
-    float* centroid_Y, ClusterSums* sums, double* max_move) {
+int update_centroids(const KMeansData* data, const int* labels, float* min_d2, float* centroid_X,
+    float* centroid_Y, ClusterSums* sums, double* max_move, int policy) {
 
     if (data == NULL || labels == NULL || centroid_X == NULL ||
         centroid_Y == NULL || sums == NULL) {
@@ -192,6 +192,49 @@ int update_centroids(const KMeansData* data, const int* labels, float* centroid_
         else {
             empty++; //Policy A: keep old centroid (Policy B goes here later)
         }
+    }
+    // Policy B
+    if (policy == 1 && empty > 0) {
+        
+        int prev_index = -1;
+        float prev_d2 = 0.0f;
+
+        for (int j = 0; j < data->K; j++) {
+            
+            // Verification for an empty cluster
+            if (sums->count[j] > 0) {
+                continue;
+            }
+
+            int max_idx = -1;
+            float max_d2 = 0.0f;
+                for (int i = 0; i < data->N; i++) {
+                    float d2 = min_d2[i];
+                    
+                    // Skip used points
+                    if (prev_index >= 0 && !(d2 < prev_d2 || (d2 == prev_d2 && i > prev_index)))
+                        continue;
+                    // Checks for the max and assign index
+                    if (max_idx < 0 || d2 > max_d2) {
+                        max_idx = i;
+                        max_d2 = d2;
+                    }
+                }
+
+            if (max_move != NULL) {
+               double dx = (double)data->X[max_idx] - (double)centroid_X[j];
+               double dy = (double)data->Y[max_idx] - (double)centroid_Y[j];
+               double d = sqrt(dx * dx + dy * dy);
+               if (d > move) move = d;
+            }
+            // Assign centroid value
+            centroid_X[j] = data->X[max_idx];
+            centroid_Y[j] = data->Y[max_idx];
+
+            prev_index = max_idx;
+            prev_d2 = max_d2;
+        }
+  
     }
 
     if (max_move != NULL) *max_move = move;
