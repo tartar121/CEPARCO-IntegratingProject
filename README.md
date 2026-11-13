@@ -8,7 +8,7 @@
 
 **Demo video:** _paste the video link here_
 
-> **Status:** The scalar C baseline, empty-cluster Policies A and B, and the XMM and YMM assignment kernels are implemented, and both SIMD versions match the scalar C results on the validation dataset. Timing of XMM / YMM, the auto-vectorized C build, and the full benchmarks are not done yet. This update follows the revised proposal below (`CEPARCO_Group2_ProjectProposalRevised.pdf`).
+> **Status:** All six Milestone #2 deliverables are complete. The scalar C baseline, empty-cluster Policies A and B (verified on both forced-empty test datasets), memory-bandwidth copy test, and both the XMM (128-bit) and YMM (256-bit) assignment kernels are implemented, verified with 0 label mismatches against scalar C, and timed on the validation dataset (`N = 1024`, `K = 4`). The auto-vectorized C build, boundary sizes, and full `N` and `K` sweep remain for Week 13. This update follows the revised proposal below (`CEPARCO_Group2_ProjectProposalRevised.pdf`).
 
 ## Where We Are
 
@@ -16,39 +16,79 @@
 | :--- | :-: | :--- |
 | Data generator | Done | Own xorshift32 + Box-Muller, so one `SEED` gives the same data with any compiler |
 | Timing harness | Done | `QueryPerformanceCounter`, 1 warm-up + 30 runs: mean, median, standard deviation, minimum; fixed-iteration mode |
-| Memory-bandwidth copy test | Done | Single-thread 256 MB copy; the ceiling will be recorded on the benchmark machine |
+| Memory-bandwidth copy test | Done | Single-thread 256 MB copy (`29.06 GB/s` best, `26.23 GB/s` mean on test machine) |
 | Scalar C baseline | Done | Vectorizer off with `#pragma loop(no_vector)`; Release listing checked: scalar instructions only, no FMA |
-| Policies A and B | Done | Both in C; Test 2 (Policy A) and Test 4 (Policy B) pass; the five-point example from [9] is TODO |
-| XMM kernel (128-bit) | Working | 0 label mismatches vs scalar C at `N = 1024`; boundary sizes and Policy B checks TODO |
-| YMM kernel (256-bit) | Working (initial) | 0 label mismatches vs scalar C at `N = 1024`; `vzeroupper` added; boundary sizes and Policy B checks TODO |
-| Auto-vectorized C build | TODO | Separate build with `/arch:AVX2`, plus FMA check on the disassembly |
-| XMM / YMM timing and speedups | TODO | Whole run and assignment-only |
-| Full `N` and `K` sweep | TODO | Week 13 |
+| Policies A and B | Done | Both in C; verified on both forced-empty datasets: Test 2 & 4 (duplicate points) and Test 5 (Nielsen & Nock [9] 5-point example) |
+| XMM kernel (128-bit) | Working | 0 label mismatches and `0` centroid difference vs scalar C at `N = 1024`; boundary sizes TODO |
+| YMM kernel (256-bit) | Working | 0 label mismatches and `0` centroid difference vs scalar C at `N = 1024`; `vzeroupper` added; boundary sizes TODO |
+| Auto-vectorized C build | TODO | Separate build with `/arch:AVX2`, plus FMA check on the disassembly (Week 13) |
+| XMM / YMM timing and speedups | Preliminary | Whole-run and assignment-only preliminary timings recorded at `N = 1024`, `K = 4`; full sweep TODO |
+| Full `N` and `K` sweep | TODO | Week 13 (`N = 2^16, 2^20, 2^24`, `K = 4, 8, 16, 32`, and boundary sizes `N = 7, 1003, 1005`) |
 
-## Results So Far
+## Results So Far (Based on the Video)
 
-Release x64, `N = 1024`, `K = 4`, `SEED = 67`, Policy A:
+### Test Machine (Preliminary Week 10 Run)
+
+| Item | Value |
+| :--- | :--- |
+| Device | Huawei MateBook D 16 (`LAPTOP-TARA`) |
+| CPU | 13th Gen Intel Core i5-13420H (2.10 GHz base, up to 4.60 GHz boost; 8 cores / 12 threads; AVX2 supported) |
+| Cache | 12 MB Intel Smart Cache (L3) |
+| RAM | 16.0 GB LPDDR4X (4267 MT/s) |
+| OS | Windows 11 Home Single Language (Version 26H2, 64-bit) |
+| IDE / Compiler | Visual Studio 2022 (MSVC v143), x64 Release (`/O2`) |
+| Assembler | NASM (`nasm -f win64`) |
+
+![Test machine](testmachine.png)
+
+### Preliminary Week 10 Output (N = 1024, K = 4)
+Release x64, `N = 1024`, `K = 4`, `SEED = 67`, Policy A (`FIXED_ITERS = 100` for timing):
 
 ```text
+-------------------------------------------------
+TESTS
 Test 1 (hand-worked example, converges): PASS
 Test 2 (duplicate points / empty clusters): PASS
 Test 3 (fixed iterations): PASS
 Test 4 (Policy B relocation): PASS
+Test 5 (five-point example, Policy A): PASS
+Test 5 (five-point example, Policy B): PASS
+-------------------------------------------------
 
 XMM K-Means vs C
+Iterations: C = 2, XMM = 2
 Label mismatches vs C: 0 of 1024 (match 100.0000%)
 Max centroid difference: 0
 Inertia: C = 199666.0206, XMM = 199666.0206
 XMM validity: PASS
 
 YMM K-Means vs C
+Iterations: C = 2, YMM = 2
 Label mismatches vs C: 0 of 1024 (match 100.0000%)
 Max centroid difference: 0
 Inertia: C = 199666.0206, YMM = 199666.0206
 YMM validity: PASS
+
+7. Timing: C vs XMM vs YMM (N = 1024, K = 4, 30 runs)
+
+Whole run (assignment + update), 100 iterations
+Version     Mean ms  Median ms  StdDev ms     Min ms   Speedup
+C             0.500      0.476      0.046      0.457     1.00x
+XMM           0.240      0.187      0.256      0.180     2.08x
+YMM           0.152      0.145      0.020      0.142     3.28x
+
+Assignment step only (one call)
+Version     Mean ms     Min ms   Speedup  Efficiency
+C            0.0045     0.0033     1.00x        100%
+XMM          0.0010     0.0007     4.71x        118%
+YMM          0.0004     0.0004    10.82x        135%
+
+8. Memory Bandwidth (copy, 256 MB, 10 runs)
+Best: 29.06 GB/s
+Mean: 26.23 GB/s
 ```
 
-**Timing:** _TODO._ Runs at `N = 1024` are too short and too noisy to report. Speedups will be measured at the planned sizes on one machine under the controlled protocol in the proposal below.
+> **Note:** `N = 1024` (`2^10`) is our small validation size, so these timings are preliminary. Whole-run speedup (`2.08x` XMM, `3.28x` YMM) is lower than assignment-only speedup (`4.71x` XMM, `10.82x` YMM) due to Amdahl's law, because the centroid update step remains sequential. Full benchmarks across `N = 2^16, 2^20, 2^24` and `K = 4, 8, 16, 32` will be measured in Week 13 under the controlled protocol in the proposal below.
 
 ## Implementation Notes (current code)
 
@@ -59,7 +99,7 @@ YMM validity: PASS
 - **Policy B rules as implemented.** An empty cluster has a count of 0 after the update step. Empty clusters, in ascending index order, each take the farthest not-yet-used point using the smallest squared distances stored by the assignment step that just ran; ties go to the lowest point index. Only the centroid moves (labels, sums, and counts are unchanged), and the jump counts toward the convergence movement.
 - **Final inertia.** Computed outside the timed region by one extra assignment pass with the final centroids, then summing the stored smallest squared distances in `double`.
 - **Leftover points.** The kernels process full blocks of 4 (XMM) or 8 (YMM) points and call the scalar C function `assign_tail_c` for the remaining `N % 4` or `N % 8` points. The YMM kernel executes `vzeroupper` before that call and before returning, to avoid AVX / SSE transition penalties.
-- **Timed region (current).** Only `kmeans()` is inside the timer. Data generation, initial centroids, the inertia pass, and printing are outside it. Per-stage and assignment-only timing are TODO.
+- **Timed region (current).** `benchmark_kmeans()` times the whole `kmeans()` loop (`FIXED_ITERS = 100`, `TOL = 0`), while `benchmark_assign()` isolates only the assignment kernel (`assign_c`, `assign_xmm`, `assign_ymm`). Data generation, centroid resets, the inertia pass, and printing are outside the timer.
 - **Input.** The dataset is generated internally from `SEED`; reading points from a file is not implemented yet.
 
 ## How to Compile
@@ -77,35 +117,36 @@ The scalar baseline uses `#pragma loop(no_vector)`, which is MSVC-specific, so t
 
 ## How to Run
 
-Build in **Release | x64** and run (Ctrl+F5 in Visual Studio, or `x64\Release\FinalProject.exe`).
+Build in **Release | x64** and run (`Ctrl+F5` in Visual Studio, or `x64\Release\FinalProject.exe`).
 
 The program currently:
-1. Runs the known-answer tests (hand-worked example, duplicate points / empty clusters, fixed iterations, Policy B relocation)
-2. Validates the inputs and generates the Gaussian-blob dataset from `SEED`
-3. Pins the thread to one core
-4. Runs scalar C k-means and prints iterations, convergence, empty-cluster events, inertia and the final centroids
-5. Times scalar C in fixed-iteration mode (1 warm-up run + 30 timed runs: mean, median, standard deviation, minimum)
-6. Measures single-thread memory-copy bandwidth
-7. Runs the XMM and YMM versions on the same data and checks them against scalar C (label match, largest centroid difference, inertia, PASS/FAIL)
+1. Runs the known-answer unit tests (hand-worked example, duplicate-point empty clusters, fixed iterations, Policy B relocation, and the Nielsen & Nock 5-point example under Policies A and B)
+2. Validates the inputs and allocates 32-byte aligned `X[]` and `Y[]` arrays
+3. Generates the Gaussian-blob dataset from `SEED` and initializes centroids to the first `K` points
+4. Pins the thread to CPU Core 0
+5. Runs sequential scalar C K-means to convergence and prints iterations, convergence, empty-cluster events, inertia, and final centroids
+6. Runs the XMM and YMM versions on the same data and checks them against scalar C (label match, largest centroid difference, inertia, PASS/FAIL)
+7. Times C, XMM, and YMM in fixed-iteration mode (1 warm-up + 30 runs) for both the whole run and the assignment step alone
+8. Measures single-thread memory-copy bandwidth (256 MB, 10 runs)
 
-_TODO: sweep over the planned `N` and `K`, XMM / YMM / auto-vectorized C timing, and per-stage timing._
+_TODO for Week 13: sweep over the planned `N` and `K`, boundary sizes (`N = 7, 1003, 1005`), and the auto-vectorized C (`/arch:AVX2`) build._
 
 ## Week 10 Checklist
 
 **Mid-project (Week 10) target**
-- [x] Data generator and timing code completed, including fixed-iteration mode, aligned memory, and the timing harness (warm-up, 30 runs, mean / median / standard deviation / minimum). Thread pinning works; the final core is still to be chosen.
+- [x] Data generator and timing code completed, including fixed-iteration mode, aligned memory, thread pinning, and the timing harness (warm-up, 30 runs, mean / median / standard deviation / minimum).
 - [x] Sequential scalar C K-means completed with compiler vectorization disabled and verified on a small hand-worked example.
-- [x] Empty-cluster Policies A and B implemented in C. Verified on the duplicate-point dataset; the five-point example from [9] is still TODO.
+- [x] Empty-cluster Policies A and B implemented in C and verified on both forced-empty test datasets (duplicate-point dataset and Nielsen & Nock 5-point example [9]).
 - [x] Memory-bandwidth copy test completed.
 - [x] XMM assignment kernel working and producing the same labels as the C version (checked at `N = 1024`).
-- [x] YMM kernel started; the initial version already passes the same check at `N = 1024`.
-- [ ] Preliminary C versus XMM timing results.
+- [x] YMM kernel implemented and verified against scalar C (`N = 1024`).
+- [x] Preliminary C versus XMM (and YMM) timing results recorded.
 
-**Still to do for Week 13:** the items under "Final (Week 13) target" in the proposal's Milestones section below.
+_**TODO for Week 13:** sweep over the planned `N` and `K`, boundary sizes (`N = 7, 1003, 1005`), and the auto-vectorized C (`/arch:AVX2`) build._
 
 ## Program Output Screenshot
 
-_TODO: add after the program runs._
+_TODO: add screenshot of the Release x64 console output after recording._
 
 ## Project Files
 
