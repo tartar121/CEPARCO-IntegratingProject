@@ -27,9 +27,18 @@ void rng_seed(unsigned int seed); //seeds our own PRNG (pseudo-random number gen
 void random_pair(double* num1, double* num2); //box-muller transform generates the gaussian pair
 void generate_data(KMeansData* data); //guassian blob coords
 
-void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y); //centroids for X and Y
-double get_time(void); //used QueryPerformanceFrequency
-double benchmark(void (*function)(void), int runs); //benchmark N runs
+typedef struct {
+    double mean;
+    double median;
+    double stddev;
+    double min;
+} TimingStats;
+
+void initialize_centroids(const KMeansData* data, float* centroid_X, float* centroid_Y); //centroids for X and Y
+void timer_init(void); //caches the QPC (QueryPerformanceCounter) frequency once
+int benchmark_kmeans(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    ClusterSums* sums, int runs, TimingStats* stats); //1 warm-up + `runs` timed runs
 
 DWORD_PTR pin_core(DWORD core); //pinned core
 
@@ -135,6 +144,7 @@ int main(void) {
 
     data.SEED = 67;
     rng_seed(data.SEED);
+    timer_init();
 
     data.EMPTY_POLICY = EMPTY_POLICY_A;
     data.FIXED_ITERS = 0;
@@ -268,6 +278,31 @@ int main(void) {
             i, centroid_X[i], centroid_Y[i]);
     }
     printf("--------------------------------------\n\n");
+
+    //timing is fixed-iteration mode (TOL = 0) so every version does identical work
+    {
+        KMeansData timing_data = data;
+        timing_data.FIXED_ITERS = 100;
+        timing_data.TOL = 0.0f;
+
+        TimingStats stats;
+
+        printf("--------------------------------------\n");
+        printf("8. Timing (Scalar C, %d iterations per run, 30 runs)\n", timing_data.FIXED_ITERS);
+
+        if (!benchmark_kmeans(&timing_data, assign_c, centroid_X, centroid_Y,
+            labels, min_d2, &sums, 30, &stats)) {
+            printf("Benchmark failed.\n");
+            goto cleanup;
+        }
+
+        printf("Mean:   %.3f ms\n", stats.mean);
+        printf("Median: %.3f ms\n", stats.median);
+        printf("StdDev: %.3f ms\n", stats.stddev);
+        printf("Min:    %.3f ms\n", stats.min);
+        printf("Per iteration (mean): %.4f ms\n", stats.mean / timing_data.FIXED_ITERS);
+        printf("--------------------------------------\n\n");
+    }
 
     //test asm
     xmmkernel();
@@ -439,7 +474,7 @@ void generate_data(KMeansData* data) {
 }
 
 //initialize X and Y centroids
-void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y) {
+void initialize_centroids(const KMeansData* data, float* centroid_X, float* centroid_Y) {
     for (int i = 0; i < data->K; i++) {
 
         centroid_X[i] = data->X[i];
@@ -447,37 +482,94 @@ void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y
     }
 }
 
-//timing function (in ms)
-double get_time(void)
-{
+static double g_ms_per_tick = 0.0;
+
+//call once at startup (the frequency never changes while the program runs)
+void timer_init(void) {
     LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-
     QueryPerformanceFrequency(&frequency);
-    QueryPerformanceCounter(&counter);
-
-    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+    g_ms_per_tick = 1000.0 / (double)frequency.QuadPart;
 }
 
+static int compare_double(const void* a, const void* b) {
+    double x = *(const double*)a;
+    double y = *(const double*)b;
+    return (x > y) - (x < y);
+}
 
-//benchmark function
-double benchmark(void (*function)(void), int runs) {
-    double start_time, end_time;
-    double total_time = 0.0;
+//times kmeans() for one assignment version
+//1 warm-up run, then `runs` timed runs; Centroids are reset to the first K
+//points before every run, and the reset is outside the timer
+//only timing mode is allowed (FIXED_ITERS > 0, TOL = 0) so every version does identical work
+int benchmark_kmeans(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    ClusterSums* sums, int runs, TimingStats* stats) {
 
-    // warm-up run
-    //TODO
-    function();
-
-    for (int i = 0; i < runs; i++) {
-
-        start_time = get_time();
-        function();
-        end_time = get_time();
-
-        total_time += end_time - start_time;
+    if (data == NULL || assign == NULL || stats == NULL || runs < 1) {
+        return 0;
     }
-    return total_time / runs;
+
+    if (data->FIXED_ITERS < 1 || data->TOL != 0.0f) {
+        printf("Timing needs FIXED_ITERS > 0 and TOL = 0.\n");
+        return 0;
+    }
+
+    double* times = (double*)malloc(runs * sizeof(double));
+    if (times == NULL) {
+        return 0;
+    }
+
+    KMeansResult result;
+
+    //warm-up run (not timed)
+    //loads caches and touches every page
+    initialize_centroids(data, centroid_X, centroid_Y);
+    if (!kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result)) {
+        free(times);
+        return 0;
+    }
+
+    for (int r = 0; r < runs; r++) {
+
+        initialize_centroids(data, centroid_X, centroid_Y); //reset, not timed
+
+        LARGE_INTEGER start, end;
+        QueryPerformanceCounter(&start);
+        int ok = kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result);
+        QueryPerformanceCounter(&end);
+
+        if (!ok) {
+            free(times);
+            return 0;
+        }
+
+        times[r] = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick;
+    }
+
+    //statistics
+    double sum = 0.0;
+    double min = times[0];
+    for (int r = 0; r < runs; r++) {
+        sum += times[r];
+        if (times[r] < min) min = times[r];
+    }
+    double mean = sum / runs;
+
+    double var = 0.0;
+    for (int r = 0; r < runs; r++) {
+        var += (times[r] - mean) * (times[r] - mean);
+    }
+
+    qsort(times, runs, sizeof(double), compare_double);
+
+    stats->mean = mean;
+    stats->min = min;
+    stats->stddev = (runs > 1) ? sqrt(var / (runs - 1)) : 0.0;
+    stats->median = (runs % 2 == 1) ? times[runs / 2]
+        : (times[runs / 2 - 1] + times[runs / 2]) / 2.0;
+
+    free(times);
+    return 1;
 }
 
 //pin thread to specific core
