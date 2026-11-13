@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -130,7 +129,7 @@ static void run_tests(void) {
 }
 
 int main(void) {
-	run_tests(); //run small tests to verify correctness
+    run_tests(); //run small tests to verify correctness
 
     //fill with temp values for now
     KMeansData data = { 0 };
@@ -152,17 +151,17 @@ int main(void) {
     data.FIXED_ITERS = 0;
 
 
-	//validate data
+    //validate data
     printf("--------------------------------------\n");
-	printf("1. Input Validation\n");
-        if (!validate_data(&data)) {
-            return 1;
-	    }
+    printf("1. Input Validation\n");
+    if (!validate_data(&data)) {
+        return 1;
+    }
     printf("Input is valid.\n");
     printf("--------------------------------------\n\n");
 
 
-	//allocate arrays
+    //allocate arrays
     printf("--------------------------------------\n");
     printf("2. X[] and Y[]\n");
 
@@ -281,6 +280,7 @@ int main(void) {
     }
     printf("--------------------------------------\n\n");
 
+
     //timing is fixed-iteration mode (TOL = 0) so every version does identical work
     {
         KMeansData timing_data = data;
@@ -323,8 +323,11 @@ int main(void) {
         printf("--------------------------------------\n\n");
     }
 
+    // XMM vs C check (assign_xmm / xmm_vs_c_check live in kmeans.c)
+    xmm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
+
     //test asm
-    xmmkernel();
+    // xmmkernel();
     ymmkernel();
 
     exit_code = 0;
