@@ -6,7 +6,7 @@
 
 # Milestone #2: Project Update (Week 10)
 
-**Demo video:** _paste the video link here_
+**Demo Video:** [Watch here](https://drive.google.com/file/d/1_cX4iw7ey9juJdPuwinqxErgC44phIvX/view?usp=sharing)
 
 > **Status:** All six Milestone #2 deliverables are complete. The scalar C baseline, empty-cluster Policies A and B (verified on both forced-empty test datasets), memory-bandwidth copy test, and both the XMM (128-bit) and YMM (256-bit) assignment kernels are implemented, verified with 0 label mismatches against scalar C, and timed on the validation dataset (`N = 1024`, `K = 4`). The auto-vectorized C build, boundary sizes, and full `N` and `K` sweep remain for Week 13. This update follows the revised proposal below (`CEPARCO_Group2_ProjectProposalRevised.pdf`).
 
@@ -73,19 +73,19 @@ YMM validity: PASS
 
 Whole run (assignment + update), 100 iterations
 Version     Mean ms  Median ms  StdDev ms     Min ms   Speedup
-C             0.500      0.476      0.046      0.457     1.00x
-XMM           0.240      0.187      0.256      0.180     2.08x
-YMM           0.152      0.145      0.020      0.142     3.28x
+C             0.508      0.485      0.066      0.457     1.00x
+XMM           0.237      0.189      0.164      0.181     2.15x
+YMM           0.150      0.147      0.008      0.142     3.38x
 
 Assignment step only (one call)
 Version     Mean ms     Min ms   Speedup  Efficiency
-C            0.0045     0.0033     1.00x        100%
-XMM          0.0010     0.0007     4.71x        118%
-YMM          0.0004     0.0004    10.82x        135%
+C            0.0049     0.0032     1.00x        100%
+XMM          0.0009     0.0008     5.70x        143%
+YMM          0.0005     0.0004     9.74x        122%
 
 8. Memory Bandwidth (copy, 256 MB, 10 runs)
-Best: 29.06 GB/s
-Mean: 26.23 GB/s
+Best: 29.75 GB/s
+Mean: 22.55 GB/s
 ```
 
 > **Note:** `N = 1024` (`2^10`) is our small validation size, so these timings are preliminary. Whole-run speedup (`2.08x` XMM, `3.28x` YMM) is lower than assignment-only speedup (`4.71x` XMM, `10.82x` YMM) due to Amdahl's law, because the centroid update step remains sequential. Full benchmarks across `N = 2^16, 2^20, 2^24` and `K = 4, 8, 16, 32` will be measured in Week 13 under the controlled protocol in the proposal below.
@@ -146,7 +146,9 @@ _**TODO for Week 13:** sweep over the planned `N` and `K`, boundary sizes (`N = 
 
 ## Program Output Screenshot
 
-_TODO: add screenshot of the Release x64 console output after recording._
+![PO1](programoutput1.png)
+![PO2](programoutput2.png)
+![PO3](programoutput3.png)
 
 ## Project Files
 
@@ -169,7 +171,7 @@ _TODO: add screenshot of the Release x64 console output after recording._
   - Tara Ysabel P. Uy: the double-precision centroid update with `ClusterSums`, the k-means loop with the function-pointer assignment step, inertia, the known-answer tests, the xorshift32 PRNG, the timing harness, the bandwidth test, the build and signature fixes.
 - **Prior work:** the centroid-oriented design (compare a group of points with one centroid at a time) follows Al Hasib et al. [7]. Lloyd [1], Hamerly [6], and Nielsen and Nock [9] are cited in the proposal below.
 - **AI tools used:**
-  - Claude (Anthropic) was used by Tara (code review and suggestions for the timing harness, the xorshift32 PRNG, and the memory-bandwidth test), by Jose Bryan (suggestions on implementing Policy B), and by Dan (guidance and bug checking while writing the XMM and YMM kernels).
+  - Claude (Anthropic) was used by Tara (code review and suggestions for the timing harness, the xorshift32 PRNG, and the memory-bandwidth test), by Jose (suggestions on implementing Policy B), and by Daniel (guidance and bug checking while writing the XMM and YMM kernels).
   - ChatGPT was used by Ethan (suggestions and implementation help for the Box-Muller transform and the Gaussian blob generator) and by Tara (review of the project status and suggestions for the group questions).
 
 ---
