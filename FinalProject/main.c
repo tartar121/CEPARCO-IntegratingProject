@@ -23,6 +23,7 @@ int allocate_arrays(KMeansData* data); //validate X[] and Y[]
 void free_arrays(KMeansData* data); //free X[] and Y[]
 
 double random_float(void); //conver srand numbers to floats
+void rng_seed(unsigned int seed); //seeds our own PRNG (pseudo-random number generator)
 void random_pair(double* num1, double* num2); //box-muller transform generates the gaussian pair
 void generate_data(KMeansData* data); //guassian blob coords
 
@@ -133,7 +134,7 @@ int main(void) {
     data.TOL = 0.001f;
 
     data.SEED = 67;
-    srand(data.SEED);
+    rng_seed(data.SEED);
 
     data.EMPTY_POLICY = EMPTY_POLICY_A;
     data.FIXED_ITERS = 0;
@@ -380,11 +381,25 @@ void free_arrays(KMeansData* data) {
     data->Y = NULL;
 }
 
-//convert rand to float between 0.0 to 1.0
+//xorshift32 PRNG (Marsaglia, 2003)
+//same seed gives the same data on any compiler
+static unsigned int rng_state = 1;
+
+//uniform in (0, 1), never exactly 0 or 1 (safe for log in box-muller)
 double random_float(void) {
-    return ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+    unsigned int x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng_state = x;
+    return ((double)x + 0.5) / 4294967296.0;
 }
 
+void rng_seed(unsigned int seed) {
+    rng_state = seed * 2654435761u; //spread small seeds across the 32 bits
+    if (rng_state == 0) rng_state = 1;//state must never be 0
+    for (int i = 0; i < 16; i++) random_float(); //discard the first few outputs
+}
 
 //normally distributed random pairs using box-muller transform
 //REF: https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
