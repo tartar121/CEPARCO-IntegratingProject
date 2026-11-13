@@ -111,6 +111,7 @@ ymm_assign_kernel:
 	mov [rsp+40], r11           ; arg6: min_d2 (tail)
 	mov [rsp+48], rdi           ; arg7: count (upper half is zero)
 	mov [rsp+56], rsi           ; arg8: K     (upper half is zero)
+	vzeroupper
 	call assign_tail_c
 
 .done:
@@ -120,4 +121,5 @@ ymm_assign_kernel:
 	pop rdi
 	pop rsi
 	pop rbx
+	vzeroupper
 	ret
