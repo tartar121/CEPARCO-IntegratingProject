@@ -38,7 +38,65 @@ double benchmark(void (*function)(void), int runs); //benchmark N runs
 
 DWORD_PTR pin_core(DWORD core); //pinned core
 
+//FOR TESTING
+//small known-answer tests for the C baseline
+static void run_tests(void) {
+    printf("--------------------------------------\n");
+    printf("TESTS\n");
+
+    //Test 1: README hand-worked example, starting centroids set by hand
+    {
+        float X[] = { 1.0f, 1.5f, 1.2f, 8.0f, 9.0f, 8.5f };
+        float Y[] = { 1.0f, 2.0f, 0.8f, 8.0f, 9.5f, 9.0f };
+        float cx[] = { 1.0f, 8.0f };
+        float cy[] = { 1.0f, 8.0f };
+        int labels[6];
+        KMeansData d = { 0 };
+        d.X = X; d.Y = Y; d.N = 6; d.K = 2;
+
+        ClusterSums sums;
+        cluster_sums_init(d.K, &sums);
+        kmeans(&d, cx, cy, labels);
+        int empty = update_centroids(&d, labels, cx, cy, &sums);
+        cluster_sums_free(&sums);
+
+        int ok = labels[0] == 0 && labels[1] == 0 && labels[2] == 0 &&
+            labels[3] == 1 && labels[4] == 1 && labels[5] == 1 &&
+            fabsf(cx[0] - 1.2333f) < 1e-3f && fabsf(cy[0] - 1.2667f) < 1e-3f &&
+            fabsf(cx[1] - 8.5f) < 1e-3f && fabsf(cy[1] - 8.8333f) < 1e-3f &&
+            empty == 0;
+        printf("Test 1 (hand-worked example): %s\n", ok ? "PASS" : "FAIL");
+    }
+
+    //Test 2: duplicate first 3 points, K = 3 -> every point ties to centroid 0
+    {
+        float X[] = { 1, 1, 1, 5, 6, 7, 8, 9 };
+        float Y[] = { 1, 1, 1, 5, 6, 7, 8, 9 };
+        float cx[] = { 1, 1, 1 };
+        float cy[] = { 1, 1, 1 };
+        int labels[8];
+        KMeansData d = { 0 };
+        d.X = X; d.Y = Y; d.N = 8; d.K = 3;
+
+        ClusterSums sums;
+        cluster_sums_init(d.K, &sums);
+        kmeans(&d, cx, cy, labels);
+        int empty = update_centroids(&d, labels, cx, cy, &sums);
+        cluster_sums_free(&sums);
+
+        int all_zero = 1;
+        for (int i = 0; i < 8; i++) if (labels[i] != 0) all_zero = 0;
+
+        //clusters 1 and 2 must be empty and keep their old position (Policy A)
+        int ok = all_zero && empty == 2 && cx[1] == 1.0f && cx[2] == 1.0f;
+        printf("Test 2 (duplicate points / empty clusters): %s\n", ok ? "PASS" : "FAIL");
+    }
+    printf("--------------------------------------\n\n");
+}
+
 int main(void) {
+	run_tests(); //run small tests to verify correctness
+
     //fill with temp values for now
     KMeansData data = { 0 };
 
@@ -170,10 +228,27 @@ int main(void) {
     printf("--------------------------------------\n\n");
 
 
+    // buffers for the centroid update
+    ClusterSums sums;
+
+    if (!cluster_sums_init(data.K, &sums)) {
+        printf("Cluster sums allocation failed.\n");
+
+        free(labels);
+        free(centroid_X);
+        free(centroid_Y);
+        free_arrays(&data);
+
+        return 1;
+    }
+
     // update centroid positions
-    if (!update_centroids(&data, labels, centroid_X, centroid_Y)) {
+    int empty = update_centroids(&data, labels, centroid_X, centroid_Y, &sums);
+
+    if (empty < 0) {
         printf("Centroid update failed.\n");
 
+        cluster_sums_free(&sums);
         free(labels);
         free(centroid_X);
         free(centroid_Y);
@@ -185,6 +260,7 @@ int main(void) {
     //updated centroids
     printf("--------------------------------------\n");
     printf("7.Updated Centroids\n");
+    printf("Empty clusters this update: %d\n", empty);
 
     for (int i = 0; i < data.K; i++) {
         printf("Centroid %d: X = %.2f, Y = %.2f\n",
@@ -199,6 +275,8 @@ int main(void) {
 
 
     //free memory
+    cluster_sums_free(&sums);
+	free(labels);
     free(centroid_X);
     free(centroid_Y);
     free_arrays(&data);

@@ -54,56 +54,76 @@ int kmeans(const KMeansData* data, float* centroid_X, float* centroid_Y, int* la
 }
 
 
+int cluster_sums_init(int K, ClusterSums* sums) {
+    sums->sum_X = (double*)malloc(K * sizeof(double));
+    sums->sum_Y = (double*)malloc(K * sizeof(double));
+    sums->count = (int*)malloc(K * sizeof(int));
+
+    if (sums->sum_X == NULL || sums->sum_Y == NULL || sums->count == NULL) {
+        free(sums->sum_X);
+        free(sums->sum_Y);
+        free(sums->count);
+        sums->sum_X = NULL;
+        sums->sum_Y = NULL;
+        sums->count = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+void cluster_sums_free(ClusterSums* sums) {
+    free(sums->sum_X);
+    free(sums->sum_Y);
+    free(sums->count);
+    sums->sum_X = NULL;
+    sums->sum_Y = NULL;
+    sums->count = NULL;
+}
+
 //updates centroids based on current labels
-int update_centroids(const KMeansData* data, const int* labels, float* centroid_X, float* centroid_Y) {
-    
-    if (data == NULL || labels == NULL || centroid_X == NULL || centroid_Y == NULL) {
-        return 0;
+//returns the number of empty clusters (>= 0), or -1 on error
+int update_centroids(const KMeansData* data, const int* labels,
+    float* centroid_X, float* centroid_Y, ClusterSums* sums) {
+
+    if (data == NULL || labels == NULL || centroid_X == NULL ||
+        centroid_Y == NULL || sums == NULL) {
+        return -1;
     }
 
-    //for X[] and Y[] sums and point count
-    float* sum_X = (float*)calloc(data->K, sizeof(float));
-    float* sum_Y = (float*)calloc(data->K, sizeof(float));
-    int* count = (int*)calloc(data->K, sizeof(int));
-
-    if (sum_X == NULL || sum_Y == NULL || count == NULL) {
-        free(sum_X);
-        free(sum_Y);
-        free(count);
-        return 0;
+    //reset sums and counts
+    for (int j = 0; j < data->K; j++) {
+        sums->sum_X[j] = 0.0;
+        sums->sum_Y[j] = 0.0;
+        sums->count[j] = 0;
     }
 
-	//sum up points in each cluster
+    //sum up points in each cluster (double, in point order)
     for (int i = 0; i < data->N; i++) {
 
         int cluster = labels[i];
 
         if (cluster < 0 || cluster >= data->K) {
-            free(sum_X);
-            free(sum_Y);
-            free(count);
-            return 0;
+            return -1;
         }
 
-        sum_X[cluster] += data->X[i];
-        sum_Y[cluster] += data->Y[i];
-
-        count[cluster]++;
+        sums->sum_X[cluster] += (double)data->X[i];
+        sums->sum_Y[cluster] += (double)data->Y[i];
+        sums->count[cluster]++;
     }
 
     //new centroid positions
+    int empty = 0;
+
     for (int j = 0; j < data->K; j++) {
 
-        if (count[j] > 0) {
-            centroid_X[j] = sum_X[j] / count[j];
-            centroid_Y[j] = sum_Y[j] / count[j];
+        if (sums->count[j] > 0) {
+            centroid_X[j] = (float)(sums->sum_X[j] / sums->count[j]);
+            centroid_Y[j] = (float)(sums->sum_Y[j] / sums->count[j]);
+        }
+        else {
+            empty++; //Policy A: keep old centroid (Policy B goes here later)
         }
     }
 
-    //free memory
-    free(sum_X);
-    free(sum_Y);
-    free(count);
-
-    return 1;
+    return empty;
 }
