@@ -7,7 +7,7 @@
 //put point to nearest centroid (scalar C version of the assignment step)
 int assign_c(const KMeansData* data, const float* centroid_X,
     const float* centroid_Y, int* labels, float* min_d2) {
-
+#pragma loop(no_vector)
     for (int i = 0; i < data->N; i++) {
 
         float dx = data->X[i] - centroid_X[0];
@@ -15,7 +15,7 @@ int assign_c(const KMeansData* data, const float* centroid_X,
 
         float min_distance = (dx * dx) + (dy * dy);
         int closest_cluster = 0;
-
+#pragma loop(no_vector)
         for (int j = 1; j < data->K; j++) {
 
             dx = data->X[i] - centroid_X[j];

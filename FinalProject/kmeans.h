@@ -60,11 +60,11 @@ void cluster_sums_free(ClusterSums* sums);
 int update_centroids(const KMeansData* data, const int* labels, float* centroid_X,
     float* centroid_Y, ClusterSums* sums, double* max_move);
 
-//[ADDED] XMM (AVX-128) assignment step: asm kernel (xmm_kernel.asm) + scalar C for the leftover
+//XMM (AVX-128) assignment step: asm kernel (xmm_kernel.asm) + scalar C for the leftover
 int assign_xmm(const KMeansData* data, const float* centroid_X,
     const float* centroid_Y, int* labels, float* min_d2);
 
-//[ADDED] runs k-means with assign_xmm from the same start as the C run, prints label match,
+// Runs k-means with assign_xmm from the same start as the C run, prints label match,
 //max centroid difference, inertia and PASS/FAIL. Returns 1 if labels match C exactly.
 int xmm_vs_c_check(const KMeansData* data, const int* c_labels,
     const float* c_centroid_X, const float* c_centroid_Y,
