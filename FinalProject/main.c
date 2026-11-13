@@ -1,10 +1,10 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <malloc.h>
 #include <stdint.h>
 #include <windows.h>
+#include <string.h>
 #include "kmeans.h"
 
 // gaussian generator parameters
@@ -22,13 +22,24 @@ int validate_data(const KMeansData* data); //validate input data
 int allocate_arrays(KMeansData* data); //validate X[] and Y[]
 void free_arrays(KMeansData* data); //free X[] and Y[]
 
-double random_float(void); //conver srand numbers to floats
+double random_float(void); //uniform (0,1) from xorshift32
+void rng_seed(unsigned int seed); //seeds our own PRNG (pseudo-random number generator)
 void random_pair(double* num1, double* num2); //box-muller transform generates the gaussian pair
 void generate_data(KMeansData* data); //guassian blob coords
 
-void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y); //centroids for X and Y
-double get_time(void); //used QueryPerformanceFrequency
-double benchmark(void (*function)(void), int runs); //benchmark N runs
+typedef struct {
+    double mean;
+    double median;
+    double stddev;
+    double min;
+} TimingStats;
+
+void initialize_centroids(const KMeansData* data, float* centroid_X, float* centroid_Y); //centroids for X and Y
+void timer_init(void); //caches the QPC (QueryPerformanceCounter) frequency once
+int benchmark_kmeans(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    ClusterSums* sums, int runs, TimingStats* stats); //1 warm-up + `runs` timed runs
+int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps); //copy test (GB/s)
 
 DWORD_PTR pin_core(DWORD core); //pinned core
 
@@ -118,7 +129,7 @@ static void run_tests(void) {
 }
 
 int main(void) {
-	run_tests(); //run small tests to verify correctness
+    run_tests(); //run small tests to verify correctness
 
     //fill with temp values for now
     KMeansData data = { 0 };
@@ -133,23 +144,24 @@ int main(void) {
     data.TOL = 0.001f;
 
     data.SEED = 67;
-    srand(data.SEED);
+    rng_seed(data.SEED);
+    timer_init();
 
     data.EMPTY_POLICY = EMPTY_POLICY_A;
     data.FIXED_ITERS = 0;
 
 
-	//validate data
+    //validate data
     printf("--------------------------------------\n");
-	printf("1. Input Validation\n");
-        if (!validate_data(&data)) {
-            return 1;
-	    }
+    printf("1. Input Validation\n");
+    if (!validate_data(&data)) {
+        return 1;
+    }
     printf("Input is valid.\n");
     printf("--------------------------------------\n\n");
 
 
-	//allocate arrays
+    //allocate arrays
     printf("--------------------------------------\n");
     printf("2. X[] and Y[]\n");
 
@@ -268,8 +280,54 @@ int main(void) {
     }
     printf("--------------------------------------\n\n");
 
+
+    //timing is fixed-iteration mode (TOL = 0) so every version does identical work
+    {
+        KMeansData timing_data = data;
+        timing_data.FIXED_ITERS = 100;
+        timing_data.TOL = 0.0f;
+
+        TimingStats stats;
+
+        printf("--------------------------------------\n");
+        printf("8. Timing (Scalar C, %d iterations per run, 30 runs)\n", timing_data.FIXED_ITERS);
+
+        if (!benchmark_kmeans(&timing_data, assign_c, centroid_X, centroid_Y,
+            labels, min_d2, &sums, 30, &stats)) {
+            printf("Benchmark failed.\n");
+            goto cleanup;
+        }
+
+        printf("Mean:   %.3f ms\n", stats.mean);
+        printf("Median: %.3f ms\n", stats.median);
+        printf("StdDev: %.3f ms\n", stats.stddev);
+        printf("Min:    %.3f ms\n", stats.min);
+        printf("Per iteration (mean): %.4f ms\n", stats.mean / timing_data.FIXED_ITERS);
+        printf("--------------------------------------\n\n");
+    }
+
+    //memory bandwidth ceiling (single thread, copy)
+    {
+        double best_gbps, mean_gbps;
+
+        printf("--------------------------------------\n");
+        printf("9. Memory Bandwidth (copy, 256 MB, 10 runs)\n");
+
+        if (!measure_bandwidth((size_t)256 << 20, 10, &best_gbps, &mean_gbps)) {
+            printf("Bandwidth test failed.\n");
+            goto cleanup;
+        }
+
+        printf("Best: %.2f GB/s\n", best_gbps);
+        printf("Mean: %.2f GB/s\n", mean_gbps);
+        printf("--------------------------------------\n\n");
+    }
+
+    // XMM vs C check (assign_xmm / xmm_vs_c_check live in kmeans.c)
+    xmm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
+
     //test asm
-    xmmkernel();
+    // xmmkernel();
     ymmkernel();
 
     exit_code = 0;
@@ -380,11 +438,25 @@ void free_arrays(KMeansData* data) {
     data->Y = NULL;
 }
 
-//convert rand to float between 0.0 to 1.0
+//xorshift32 PRNG (Marsaglia, 2003)
+//same seed gives the same data on any compiler
+static unsigned int rng_state = 1;
+
+//uniform in (0, 1), never exactly 0 or 1 (safe for log in box-muller)
 double random_float(void) {
-    return ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+    unsigned int x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng_state = x;
+    return ((double)x + 0.5) / 4294967296.0;
 }
 
+void rng_seed(unsigned int seed) {
+    rng_state = seed * 2654435761u; //spread small seeds across the 32 bits
+    if (rng_state == 0) rng_state = 1;//state must never be 0
+    for (int i = 0; i < 16; i++) random_float(); //discard the first few outputs
+}
 
 //normally distributed random pairs using box-muller transform
 //REF: https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
@@ -424,7 +496,7 @@ void generate_data(KMeansData* data) {
 }
 
 //initialize X and Y centroids
-void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y) {
+void initialize_centroids(const KMeansData* data, float* centroid_X, float* centroid_Y) {
     for (int i = 0; i < data->K; i++) {
 
         centroid_X[i] = data->X[i];
@@ -432,37 +504,147 @@ void initialize_centroids(KMeansData* data, float* centroid_X, float* centroid_Y
     }
 }
 
-//timing function (in ms)
-double get_time(void)
-{
+static double g_ms_per_tick = 0.0;
+
+//call once at startup (the frequency never changes while the program runs)
+void timer_init(void) {
     LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-
     QueryPerformanceFrequency(&frequency);
-    QueryPerformanceCounter(&counter);
-
-    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+    g_ms_per_tick = 1000.0 / (double)frequency.QuadPart;
 }
 
+static int compare_double(const void* a, const void* b) {
+    double x = *(const double*)a;
+    double y = *(const double*)b;
+    return (x > y) - (x < y);
+}
 
-//benchmark function
-double benchmark(void (*function)(void), int runs) {
-    double start_time, end_time;
-    double total_time = 0.0;
+//times kmeans() for one assignment version
+//1 warm-up run, then `runs` timed runs; Centroids are reset to the first K
+//points before every run, and the reset is outside the timer
+//only timing mode is allowed (FIXED_ITERS > 0, TOL = 0) so every version does identical work
+int benchmark_kmeans(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    ClusterSums* sums, int runs, TimingStats* stats) {
 
-    // warm-up run
-    //TODO
-    function();
-
-    for (int i = 0; i < runs; i++) {
-
-        start_time = get_time();
-        function();
-        end_time = get_time();
-
-        total_time += end_time - start_time;
+    if (data == NULL || assign == NULL || stats == NULL || runs < 1) {
+        return 0;
     }
-    return total_time / runs;
+
+    if (data->FIXED_ITERS < 1 || data->TOL != 0.0f) {
+        printf("Timing needs FIXED_ITERS > 0 and TOL = 0.\n");
+        return 0;
+    }
+
+    double* times = (double*)malloc(runs * sizeof(double));
+    if (times == NULL) {
+        return 0;
+    }
+
+    KMeansResult result;
+
+    //warm-up run (not timed)
+    //loads caches and touches every page
+    initialize_centroids(data, centroid_X, centroid_Y);
+    if (!kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result)) {
+        free(times);
+        return 0;
+    }
+
+    for (int r = 0; r < runs; r++) {
+
+        initialize_centroids(data, centroid_X, centroid_Y); //reset, not timed
+
+        LARGE_INTEGER start, end;
+        QueryPerformanceCounter(&start);
+        int ok = kmeans(data, assign, centroid_X, centroid_Y, labels, min_d2, sums, &result);
+        QueryPerformanceCounter(&end);
+
+        if (!ok) {
+            free(times);
+            return 0;
+        }
+
+        times[r] = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick;
+    }
+
+    //statistics
+    double sum = 0.0;
+    double min = times[0];
+    for (int r = 0; r < runs; r++) {
+        sum += times[r];
+        if (times[r] < min) min = times[r];
+    }
+    double mean = sum / runs;
+
+    double var = 0.0;
+    for (int r = 0; r < runs; r++) {
+        var += (times[r] - mean) * (times[r] - mean);
+    }
+
+    qsort(times, runs, sizeof(double), compare_double);
+
+    stats->mean = mean;
+    stats->min = min;
+    stats->stddev = (runs > 1) ? sqrt(var / (runs - 1)) : 0.0;
+    stats->median = (runs % 2 == 1) ? times[runs / 2]
+        : (times[runs / 2 - 1] + times[runs / 2]) / 2.0;
+
+    free(times);
+    return 1;
+}
+
+//single-thread copy bandwidth in GB/s (read + write bytes, STREAM-style)
+//bytes must be much larger than the last-level cache (e.g. 256 MB)
+int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps) {
+
+    if (best_gbps == NULL || mean_gbps == NULL || runs < 1 || bytes == 0) {
+        return 0;
+    }
+
+    char* src = (char*)_aligned_malloc(bytes, 32);
+    char* dst = (char*)_aligned_malloc(bytes, 32);
+
+    if (src == NULL || dst == NULL) {
+        _aligned_free(src);
+        _aligned_free(dst);
+        return 0;
+    }
+
+    //touch both buffers once so page faults are not measured
+    memset(src, 1, bytes);
+    memset(dst, 0, bytes);
+
+    //warm-up copy (not timed)
+    memcpy(dst, src, bytes);
+
+    double best = 0.0;
+    double total = 0.0;
+
+    for (int r = 0; r < runs; r++) {
+
+        LARGE_INTEGER start, end;
+        QueryPerformanceCounter(&start);
+        memcpy(dst, src, bytes);
+        QueryPerformanceCounter(&end);
+
+        double seconds = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick / 1000.0;
+        double gbps = (2.0 * (double)bytes) / seconds / 1e9; //read + write bytes
+
+        total += gbps;
+        if (gbps > best) best = gbps;
+    }
+
+    //read a byte back so the copies cannot be optimized away
+    volatile char sink = dst[bytes - 1];
+    (void)sink;
+
+    *best_gbps = best;
+    *mean_gbps = total / runs;
+
+    _aligned_free(src);
+    _aligned_free(dst);
+    return 1;
 }
 
 //pin thread to specific core
