@@ -142,7 +142,7 @@ static void run_tests(void) {
         ClusterSums sums;
         KMeansResult r;
         cluster_sums_init(d.K, &sums);
-        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r, d.EMPTY_POLICY);
         cluster_sums_free(&sums);
 
         int ok = run_ok && r.empty_events == 2 &&
