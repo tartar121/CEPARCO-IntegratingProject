@@ -57,8 +57,8 @@ void cluster_sums_free(ClusterSums* sums);
 
 //returns the number of empty clusters (>= 0) or -1 on error
 //max_move (optional, may be NULL) receives the largest distance any centroid moved
-int update_centroids(const KMeansData* data, const int* labels, float* centroid_X,
-    float* centroid_Y, ClusterSums* sums, double* max_move);
+int update_centroids(const KMeansData* data, const int* labels, float* min_d2, float* centroid_X,
+    float* centroid_Y, ClusterSums* sums, double* max_move, int policy);
 
 //XMM (AVX-128) assignment step: asm kernel (xmm_kernel.asm) + scalar C for the leftover
 int assign_xmm(const KMeansData* data, const float* centroid_X,
