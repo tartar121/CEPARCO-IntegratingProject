@@ -6,7 +6,7 @@
 
 # Milestone #2: Project Update (Week 10)
 
-**Demo video:** _TODO: paste the video link here_
+**Demo video:** _paste the video link here_
 
 > **Status:** The scalar C baseline, empty-cluster Policies A and B, and the XMM and YMM assignment kernels are implemented, and both SIMD versions match the scalar C results on the validation dataset. Timing of XMM / YMM, the auto-vectorized C build, and the full benchmarks are not done yet. This update follows the revised proposal below (`CEPARCO_Group2_ProjectProposalRevised.pdf`).
 
@@ -127,7 +127,9 @@ _TODO: add after the program runs._
   - Daniel Jedrick C. Dabuit: the XMM and YMM kernels and their C wrappers (`assign_xmm`, `assign_ymm`).
   - Tara Ysabel P. Uy: the double-precision centroid update with `ClusterSums`, the k-means loop with the function-pointer assignment step, inertia, the known-answer tests, the xorshift32 PRNG, the timing harness, the bandwidth test, the build and signature fixes.
 - **Prior work:** the centroid-oriented design (compare a group of points with one centroid at a time) follows Al Hasib et al. [7]. Lloyd [1], Hamerly [6], and Nielsen and Nock [9] are cited in the proposal below.
-- **AI tools used:** Claude (Anthropic) was used for code review and suggestions for the timing harness, the xorshift32 PRNG, and the memory-bandwidth test. ChatGPT was used for [what it was used for]. [Kernel authorship and AI: Dan to confirm whether AI was used on the kernels.]
+- **AI tools used:**
+  - Claude (Anthropic) was used by Tara (code review and suggestions for the timing harness, the xorshift32 PRNG, and the memory-bandwidth test), by Jose Bryan (suggestions on implementing Policy B), and by Dan (guidance and bug checking while writing the XMM and YMM kernels).
+  - ChatGPT was used by Ethan (suggestions and implementation help for the Box-Muller transform and the Gaussian blob generator) and by Tara (review of the project status and suggestions for the group questions).
 
 ---
 
@@ -135,7 +137,7 @@ _TODO: add after the program runs._
 
 _This is the revised proposal that was submitted to our professor (`CEPARCO_Group2_ProjectProposalRevised.pdf`)._
 
-## Project Proposal Video Pitch (OLD)
+## Project Proposal Video Pitch
 - ~~**Video pitch (5-8 min):** [Watch here](https://drive.google.com/file/d/17PanjDcpvq3jb04gxR7asMjCW3-3cH5n/view?usp=sharing)~~
 
 ---
@@ -460,6 +462,6 @@ _TODO. Questions to answer once the results are in:_
 ## Submitted By
 
 - [Daniel Jedrick C. Dabuit](https://github.com/danueli)
-- [Ethan Daniel Magbatoc](https://github.com/ethanndaniel)
-- [Jose Bryan Perez](https://github.com/JoseBryanPerez)
+- [Ethan Daniel B. Magbatoc](https://github.com/ethanndaniel)
+- [Jose Bryan L. Perez](https://github.com/JoseBryanPerez)
 - [Tara Ysabel P. Uy](https://github.com/tartar121)
