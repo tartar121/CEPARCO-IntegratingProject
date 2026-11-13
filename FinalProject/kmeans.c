@@ -37,7 +37,7 @@ int assign_c(const KMeansData* data, const float* centroid_X,
 }
 
 
-//K-means loop. The assignment step is passed in, everything else is shared.
+//K-means loop. The assignment step is passed in, everything else is shared
 //FIXED_ITERS > 0: timing mode, runs exactly FIXED_ITERS iterations, no convergence check
 //FIXED_ITERS == 0: correctness mode, stops when max centroid movement <= TOL or at MAX_ITER
 int kmeans(const KMeansData* data, AssignFn assign, float* centroid_X, float* centroid_Y,
@@ -88,8 +88,8 @@ int kmeans(const KMeansData* data, AssignFn assign, float* centroid_X, float* ce
 
 
 //final inertia: one extra assignment against the FINAL centroids, then a
-//sequential double-precision sum of the smallest squared distances.
-//leaves labels[] consistent with the final centroids. Run this OUTSIDE the timer.
+//sequential double-precision sum of the smallest squared distances
+//leaves labels[] consistent with the final centroids. Run this OUTSIDE the timer
 int compute_inertia(const KMeansData* data, AssignFn assign, const float* centroid_X,
     const float* centroid_Y, int* labels, float* min_d2, double* inertia) {
 
@@ -244,9 +244,9 @@ int update_centroids(const KMeansData* data, const int* labels, float* min_d2, f
 
 
 //=====================================================================
-// XMM (AVX-128) assignment step
+//XMM (AVX-128) assignment step
 //Call direction: C (assign_xmm) calls asm (xmm_assign_kernel), and the asm
-//calls back into C (assign_tail_c) for the N % 4 leftover points.
+//calls back into C (assign_tail_c) for the N % 4 leftover points
 //=====================================================================
 
 #include <malloc.h> //for _aligned_malloc / _aligned_free
@@ -259,11 +259,11 @@ extern void xmm_assign_kernel(const float* X, const float* Y,
 
 
 //C CALLEE, called FROM xmm.asm (xmm_assign_kernel) for the leftover points
-//(N % 4 for XMM; the YMM kernel can call the same function for N % 8).
-//X, Y, labels and min_d2 already point at the first leftover point; count = how many.
-//No distance math is repeated here: it wraps the leftover points in a small
+//(N % 4 for XMM; the YMM kernel can call the same function for N % 8)
+//X, Y, labels and min_d2 already point at the first leftover point; count = how many
+//no distance math is repeated here: it wraps the leftover points in a small
 //KMeansData view and lets assign_c compute them, so the XMM/YMM tail and the
-//scalar baseline are guaranteed to use the same code (same math, same tie-break).
+//scalar baseline are guaranteed to use the same code (same math, same tie-break)
 void assign_tail_c(const float* X, const float* Y, const float* cx, const float* cy,
     int* labels, float* min_d2, int count, int K) {
 
@@ -277,8 +277,8 @@ void assign_tail_c(const float* X, const float* Y, const float* cx, const float*
 }
 
 
-//XMM assignment step (same AssignFn signature as assign_c).
-//C calls the asm; the asm does the vector part and calls assign_tail_c for the leftover.
+//XMM assignment step (same AssignFn signature as assign_c)
+//C calls the asm; the asm does the vector part and calls assign_tail_c for the leftover
 int assign_xmm(const KMeansData* data, const float* centroid_X,
     const float* centroid_Y, int* labels, float* min_d2) {
 
@@ -306,7 +306,7 @@ int xmm_vs_c_check(const KMeansData* data, const int* c_labels,
     float* d2 = (float*)_aligned_malloc(data->N * sizeof(float), 32);
     KMeansResult r = { 0 };
 
-    printf("--------------------------------------\n");
+    printf("--------------------------------------------------------------\n");
     printf("XMM K-Means vs C\n");
 
     if (cx == NULL || cy == NULL || labels == NULL || d2 == NULL) {
@@ -355,7 +355,7 @@ int xmm_vs_c_check(const KMeansData* data, const int* c_labels,
     ok = (mismatches == 0);
 
 done:
-    printf("--------------------------------------\n\n");
+    printf("--------------------------------------------------------------\n\n");
     free(cx);
     free(cy);
     _aligned_free(labels);
@@ -365,9 +365,9 @@ done:
 
 //=====================================================================
 // YMM (AVX-256) assignment step
-// The asm kernel lives in ymm.asm (below the printf stub, NASM, win64).
+// The asm kernel lives in ymm.asm (below the printf stub, NASM, win64)
 // Call direction: C (assign_ymm) calls asm (ymm_assign_kernel), and the asm
-// calls back into C (assign_tail_c) for the N % 8 leftover points.
+// calls back into C (assign_tail_c) for the N % 8 leftover points
 //=====================================================================
 
 // asm kernel in ymm.asm: processes floor(N/8)*8 points, 8 per step,
@@ -376,8 +376,8 @@ extern void ymm_assign_kernel(const float* X, const float* Y,
     const float* cx, const float* cy,
     int* labels, float* min_d2, int N, int K);
 
-// YMM assignment step (same AssignFn signature as assign_c).
-// C calls the asm; the asm does the vector part and calls assign_tail_c for the leftover.
+// YMM assignment step (same AssignFn signature as assign_c)
+// C calls the asm; the asm does the vector part and calls assign_tail_c for the leftover
 int assign_ymm(const KMeansData* data, const float* centroid_X,
     const float* centroid_Y, int* labels, float* min_d2) {
 
@@ -403,7 +403,7 @@ int ymm_vs_c_check(const KMeansData* data, const int* c_labels,
     float* d2 = (float*)_aligned_malloc(data->N * sizeof(float), 32);
     KMeansResult r = { 0 };
 
-    printf("--------------------------------------\n");
+    printf("--------------------------------------------------------------\n");
     printf("YMM K-Means vs C\n");
 
     if (cx == NULL || cy == NULL || labels == NULL || d2 == NULL) {
@@ -452,7 +452,7 @@ int ymm_vs_c_check(const KMeansData* data, const int* c_labels,
     ok = (mismatches == 0);
 
 done:
-    printf("--------------------------------------\n\n");
+    printf("--------------------------------------------------------------\n\n");
     free(cx);
     free(cy);
     _aligned_free(labels);

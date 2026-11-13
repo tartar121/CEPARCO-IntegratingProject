@@ -39,6 +39,9 @@ void timer_init(void); //caches the QPC (QueryPerformanceCounter) frequency once
 int benchmark_kmeans(const KMeansData* data, AssignFn assign,
     float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
     ClusterSums* sums, int runs, TimingStats* stats); //1 warm-up + `runs` timed runs
+int benchmark_assign(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    int calls, int runs, TimingStats* stats); //times ONLY the assignment step
 int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps); //copy test (GB/s)
 
 DWORD_PTR pin_core(DWORD core); //pinned core
@@ -46,7 +49,7 @@ DWORD_PTR pin_core(DWORD core); //pinned core
 //FOR TESTING
 //known-answer tests for the C baseline
 static void run_tests(void) {
-    printf("--------------------------------------\n");
+    printf("-------------------------------------------------\n");
     printf("TESTS\n");
 
     //Test 1: README hand-worked example with the real rule (first K points = starting centroids)
@@ -151,7 +154,46 @@ static void run_tests(void) {
             cx[2] == 8.0f && cy[2] == 8.0f;
         printf("Test 4 (Policy B relocation): %s\n", ok ? "PASS" : "FAIL");
     }
-    printf("--------------------------------------\n\n");
+    //Test 5: five-point example from Nielsen and Nock [9] (n = 5, K = 3).
+    //Starting centroids are set by hand to p3, p4, p5. The second assignment leaves
+    //cluster 1 empty. Policy A keeps its centroid; Policy B moves it to the farthest
+    //point. Points 0 and 2 tie at d2 = 0.2118, so the lowest index (point 0) wins.
+    for (int policy = 0; policy <= 1; policy++) {
+        float X[] = { 0.0f, 0.25f, 0.03f, 0.66f, 0.6f };
+        float Y[] = { 0.0f, 0.19f, 0.92f, 0.79f, 0.85f };
+        float cx[] = { 0.03f, 0.66f, 0.6f };
+        float cy[] = { 0.92f, 0.79f, 0.85f };
+        int labels[5];
+        float d2[5];
+        KMeansData d = { 0 };
+        d.X = X; d.Y = Y; d.N = 5; d.K = 3;
+        d.MAX_ITER = 100; d.TOL = 0.0f; d.FIXED_ITERS = 2;
+        d.EMPTY_POLICY = policy;
+
+        ClusterSums sums;
+        KMeansResult r;
+        cluster_sums_init(d.K, &sums);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r, d.EMPTY_POLICY);
+        cluster_sums_free(&sums);
+
+        //second assignment: labels 0 0 0 2 2, cluster 1 empty
+        int labels_ok = labels[0] == 0 && labels[1] == 0 && labels[2] == 0 &&
+            labels[3] == 2 && labels[4] == 2;
+
+        //cluster 0 and 2 are the means of their points in both policies
+        int means_ok = fabsf(cx[0] - 0.0933f) < 1e-3f && fabsf(cy[0] - 0.37f) < 1e-3f &&
+            fabsf(cx[2] - 0.63f) < 1e-3f && fabsf(cy[2] - 0.82f) < 1e-3f;
+
+        //cluster 1: A keeps (0.455, 0.49), B relocates to point 0 = (0, 0)
+        int empty_ok = (policy == 0)
+            ? (fabsf(cx[1] - 0.455f) < 1e-3f && fabsf(cy[1] - 0.49f) < 1e-3f)
+            : (fabsf(cx[1] - 0.0f) < 1e-3f && fabsf(cy[1] - 0.0f) < 1e-3f);
+
+        int ok = run_ok && r.iterations == 2 && r.empty_events == 1 &&
+            labels_ok && means_ok && empty_ok;
+        printf("Test 5 (five-point example, Policy %c): %s\n", policy == 0 ? 'A' : 'B', ok ? "PASS" : "FAIL");
+    }
+    printf("-------------------------------------------------\n\n");
 }
 
 int main(void) {
@@ -242,7 +284,7 @@ int main(void) {
     printf("--------------------------------------\n");
 
     //pin thread to core 0
-    printf("5. Pinning thread to CPU Core 0\n");
+    printf("4. Pinning thread to CPU Core 0\n");
     DWORD_PTR old_affinity = pin_core(0);
 
     if (old_affinity == 0) {
@@ -272,7 +314,7 @@ int main(void) {
 
     //k-means clustering
     printf("--------------------------------------\n");
-    printf("6. Sequential C K-Means\n");
+    printf("5. Sequential C K-Means\n");
 
     if (!kmeans(&data, assign_c, centroid_X, centroid_Y, labels, min_d2, &sums, &result, data.EMPTY_POLICY)) {
         printf("K-means failed.\n");
@@ -294,11 +336,11 @@ int main(void) {
     for (int i = 0; i < 10 && i < data.N; i++) {
         printf("Point %d : Cluster %d\n", i, labels[i]);
     }
-    printf("--------------------------------------\n\n");
+    printf("--------------------------------------\n");
 
     //final centroids
     printf("--------------------------------------\n");
-    printf("7. Final Centroids\n");
+    printf("6. Final Centroids\n");
 
     for (int i = 0; i < data.K; i++) {
         printf("Centroid %d: X = %.2f, Y = %.2f\n",
@@ -306,38 +348,65 @@ int main(void) {
     }
     printf("--------------------------------------\n\n");
 
+    // XMM vs C check (assign_xmm / xmm_vs_c_check live in kmeans.c)
+    xmm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
 
-    //timing is fixed-iteration mode (TOL = 0) so every version does identical work
+    // YMM vs C check (assign_ymm / ymm_vs_c_check live in kmeans.c)
+    ymm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
+
+    //timing: C vs XMM vs YMM, same data and same starting centroids
     {
-        KMeansData timing_data = data;
-        timing_data.FIXED_ITERS = 100;
-        timing_data.TOL = 0.0f;
+        KMeansData td = data;
+        td.FIXED_ITERS = 100;   //timing mode: exactly this many iterations
+        td.TOL = 0.0f;
 
-        TimingStats stats;
+        const char* names[3] = { "C", "XMM", "YMM" };
+        double ideal[3] = { 1.0, 4.0, 8.0 };
+        AssignFn fns[3] = { assign_c, assign_xmm, assign_ymm };
+        TimingStats whole[3], only[3];
 
-        printf("--------------------------------------\n");
-        printf("8. Timing (Scalar C, %d iterations per run, 30 runs)\n", timing_data.FIXED_ITERS);
+        int calls = (1 << 22) / td.N;   //keeps the work per timed run about the same
+        if (calls < 1) calls = 1;
 
-        if (!benchmark_kmeans(&timing_data, assign_c, centroid_X, centroid_Y,
-            labels, min_d2, &sums, 30, &stats)) {
-            printf("Benchmark failed.\n");
-            goto cleanup;
+        printf("--------------------------------------------------------------\n");
+        printf("7. Timing: C vs XMM vs YMM (N = %d, K = %d, 30 runs)\n", td.N, td.K);
+
+        for (int v = 0; v < 3; v++) {
+            if (!benchmark_kmeans(&td, fns[v], centroid_X, centroid_Y, labels, min_d2,
+                &sums, 30, &whole[v]) ||
+                !benchmark_assign(&td, fns[v], centroid_X, centroid_Y, labels, min_d2,
+                    calls, 30, &only[v])) {
+                printf("Benchmark failed for %s.\n", names[v]);
+                goto cleanup;
+            }
         }
 
-        printf("Mean:   %.3f ms\n", stats.mean);
-        printf("Median: %.3f ms\n", stats.median);
-        printf("StdDev: %.3f ms\n", stats.stddev);
-        printf("Min:    %.3f ms\n", stats.min);
-        printf("Per iteration (mean): %.4f ms\n", stats.mean / timing_data.FIXED_ITERS);
-        printf("--------------------------------------\n\n");
+        printf("\nWhole run (assignment + update), %d iterations\n", td.FIXED_ITERS);
+        printf("%-8s %10s %10s %10s %10s %9s\n",
+            "Version", "Mean ms", "Median ms", "StdDev ms", "Min ms", "Speedup");
+        for (int v = 0; v < 3; v++) {
+            printf("%-8s %10.3f %10.3f %10.3f %10.3f %8.2fx\n", names[v],
+                whole[v].mean, whole[v].median, whole[v].stddev, whole[v].min,
+                whole[0].mean / whole[v].mean);
+        }
+
+        printf("\nAssignment step only (one call)\n");
+        printf("%-8s %10s %10s %9s %11s\n",
+            "Version", "Mean ms", "Min ms", "Speedup", "Efficiency");
+        for (int v = 0; v < 3; v++) {
+            double speedup = only[0].mean / only[v].mean;
+            printf("%-8s %10.4f %10.4f %8.2fx %10.0f%%\n", names[v],
+                only[v].mean, only[v].min, speedup, 100.0 * speedup / ideal[v]);
+        }
+        printf("--------------------------------------------------------------\n\n");
     }
 
     //memory bandwidth ceiling (single thread, copy)
     {
         double best_gbps, mean_gbps;
 
-        printf("--------------------------------------\n");
-        printf("9. Memory Bandwidth (copy, 256 MB, 10 runs)\n");
+        printf("--------------------------------------------------------------\n");
+        printf("8. Memory Bandwidth (copy, 256 MB, 10 runs)\n");
 
         if (!measure_bandwidth((size_t)256 << 20, 10, &best_gbps, &mean_gbps)) {
             printf("Bandwidth test failed.\n");
@@ -346,17 +415,10 @@ int main(void) {
 
         printf("Best: %.2f GB/s\n", best_gbps);
         printf("Mean: %.2f GB/s\n", mean_gbps);
-        printf("--------------------------------------\n\n");
+        printf("--------------------------------------------------------------\n\n");
     }
 
-    // Test asm 
-
-    // XMM vs C check (assign_xmm / xmm_vs_c_check live in kmeans.c)
-    xmm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
-
-    // YMM vs C check (assign_ymm / ymm_vs_c_check live in kmeans.c)
-    ymm_vs_c_check(&data, labels, centroid_X, centroid_Y, &result, &sums);
-
+    // Test asm
     // xmmkernel();
     // ymmkernel();
 
@@ -620,6 +682,72 @@ int benchmark_kmeans(const KMeansData* data, AssignFn assign,
     stats->median = (runs % 2 == 1) ? times[runs / 2]
         : (times[runs / 2 - 1] + times[runs / 2]) / 2.0;
 
+    free(times);
+    return 1;
+}
+
+//mean, median, standard deviation and minimum of `runs` times (sorts `times`)
+static void fill_stats(double* times, int runs, TimingStats* stats) {
+    double sum = 0.0;
+    double min = times[0];
+    for (int r = 0; r < runs; r++) {
+        sum += times[r];
+        if (times[r] < min) min = times[r];
+    }
+    double mean = sum / runs;
+
+    double var = 0.0;
+    for (int r = 0; r < runs; r++) {
+        var += (times[r] - mean) * (times[r] - mean);
+    }
+
+    qsort(times, runs, sizeof(double), compare_double);
+
+    stats->mean = mean;
+    stats->min = min;
+    stats->stddev = (runs > 1) ? sqrt(var / (runs - 1)) : 0.0;
+    stats->median = (runs % 2 == 1) ? times[runs / 2]
+        : (times[runs / 2 - 1] + times[runs / 2]) / 2.0;
+}
+
+//times ONLY the assignment step. Each timed run makes `calls` calls and the result is
+//the time of one call (ms). Centroids stay at the first K points, so every version
+//does identical work. 1 untimed warm-up run first.
+int benchmark_assign(const KMeansData* data, AssignFn assign,
+    float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
+    int calls, int runs, TimingStats* stats) {
+
+    if (data == NULL || assign == NULL || stats == NULL || calls < 1 || runs < 1) {
+        return 0;
+    }
+
+    double* times = (double*)malloc(runs * sizeof(double));
+    if (times == NULL) {
+        return 0;
+    }
+
+    initialize_centroids(data, centroid_X, centroid_Y);
+
+    //warm-up (not timed)
+    for (int c = 0; c < calls; c++) {
+        if (!assign(data, centroid_X, centroid_Y, labels, min_d2)) {
+            free(times);
+            return 0;
+        }
+    }
+
+    for (int r = 0; r < runs; r++) {
+        LARGE_INTEGER start, end;
+        QueryPerformanceCounter(&start);
+        for (int c = 0; c < calls; c++) {
+            assign(data, centroid_X, centroid_Y, labels, min_d2);
+        }
+        QueryPerformanceCounter(&end);
+
+        times[r] = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick / calls;
+    }
+
+    fill_stats(times, runs, stats);
     free(times);
     return 1;
 }
