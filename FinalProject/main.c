@@ -125,6 +125,32 @@ static void run_tests(void) {
         int ok = run_ok && r.iterations == 10 && r.converged == 0;
         printf("Test 3 (fixed iterations): %s\n", ok ? "PASS" : "FAIL");
     }
+
+    //Test 4: Policy B on the duplicate-point dataset -> empty clusters relocate to the farthest points
+    {
+        float X[] = { 1, 1, 1, 5, 6, 7, 8, 9 };
+        float Y[] = { 1, 1, 1, 5, 6, 7, 8, 9 };
+        float cx[] = { 1, 1, 1 };
+        float cy[] = { 1, 1, 1 };
+        int labels[8];
+        float d2[8];
+        KMeansData d = { 0 };
+        d.X = X; d.Y = Y; d.N = 8; d.K = 3;
+        d.MAX_ITER = 100; d.TOL = 0.0f; d.FIXED_ITERS = 1;
+        d.EMPTY_POLICY = EMPTY_POLICY_B;
+
+        ClusterSums sums;
+        KMeansResult r;
+        cluster_sums_init(d.K, &sums);
+        int run_ok = kmeans(&d, assign_c, cx, cy, labels, d2, &sums, &r);
+        cluster_sums_free(&sums);
+
+        int ok = run_ok && r.empty_events == 2 &&
+            fabsf(cx[0] - 4.75f) < 1e-3f && fabsf(cy[0] - 4.75f) < 1e-3f &&
+            cx[1] == 9.0f && cy[1] == 9.0f &&
+            cx[2] == 8.0f && cy[2] == 8.0f;
+        printf("Test 4 (Policy B relocation): %s\n", ok ? "PASS" : "FAIL");
+    }
     printf("--------------------------------------\n\n");
 }
 
