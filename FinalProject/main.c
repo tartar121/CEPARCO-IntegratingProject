@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <stdint.h>
 #include <windows.h>
+#include <string.h>
 #include "kmeans.h"
 
 // gaussian generator parameters
@@ -22,7 +23,7 @@ int validate_data(const KMeansData* data); //validate input data
 int allocate_arrays(KMeansData* data); //validate X[] and Y[]
 void free_arrays(KMeansData* data); //free X[] and Y[]
 
-double random_float(void); //conver srand numbers to floats
+double random_float(void); //uniform (0,1) from xorshift32
 void rng_seed(unsigned int seed); //seeds our own PRNG (pseudo-random number generator)
 void random_pair(double* num1, double* num2); //box-muller transform generates the gaussian pair
 void generate_data(KMeansData* data); //guassian blob coords
@@ -39,6 +40,7 @@ void timer_init(void); //caches the QPC (QueryPerformanceCounter) frequency once
 int benchmark_kmeans(const KMeansData* data, AssignFn assign,
     float* centroid_X, float* centroid_Y, int* labels, float* min_d2,
     ClusterSums* sums, int runs, TimingStats* stats); //1 warm-up + `runs` timed runs
+int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps); //copy test (GB/s)
 
 DWORD_PTR pin_core(DWORD core); //pinned core
 
@@ -301,6 +303,23 @@ int main(void) {
         printf("StdDev: %.3f ms\n", stats.stddev);
         printf("Min:    %.3f ms\n", stats.min);
         printf("Per iteration (mean): %.4f ms\n", stats.mean / timing_data.FIXED_ITERS);
+        printf("--------------------------------------\n\n");
+    }
+
+    //memory bandwidth ceiling (single thread, copy)
+    {
+        double best_gbps, mean_gbps;
+
+        printf("--------------------------------------\n");
+        printf("9. Memory Bandwidth (copy, 256 MB, 10 runs)\n");
+
+        if (!measure_bandwidth((size_t)256 << 20, 10, &best_gbps, &mean_gbps)) {
+            printf("Bandwidth test failed.\n");
+            goto cleanup;
+        }
+
+        printf("Best: %.2f GB/s\n", best_gbps);
+        printf("Mean: %.2f GB/s\n", mean_gbps);
         printf("--------------------------------------\n\n");
     }
 
@@ -569,6 +588,59 @@ int benchmark_kmeans(const KMeansData* data, AssignFn assign,
         : (times[runs / 2 - 1] + times[runs / 2]) / 2.0;
 
     free(times);
+    return 1;
+}
+
+//single-thread copy bandwidth in GB/s (read + write bytes, STREAM-style)
+//bytes must be much larger than the last-level cache (e.g. 256 MB)
+int measure_bandwidth(size_t bytes, int runs, double* best_gbps, double* mean_gbps) {
+
+    if (best_gbps == NULL || mean_gbps == NULL || runs < 1 || bytes == 0) {
+        return 0;
+    }
+
+    char* src = (char*)_aligned_malloc(bytes, 32);
+    char* dst = (char*)_aligned_malloc(bytes, 32);
+
+    if (src == NULL || dst == NULL) {
+        _aligned_free(src);
+        _aligned_free(dst);
+        return 0;
+    }
+
+    //touch both buffers once so page faults are not measured
+    memset(src, 1, bytes);
+    memset(dst, 0, bytes);
+
+    //warm-up copy (not timed)
+    memcpy(dst, src, bytes);
+
+    double best = 0.0;
+    double total = 0.0;
+
+    for (int r = 0; r < runs; r++) {
+
+        LARGE_INTEGER start, end;
+        QueryPerformanceCounter(&start);
+        memcpy(dst, src, bytes);
+        QueryPerformanceCounter(&end);
+
+        double seconds = (double)(end.QuadPart - start.QuadPart) * g_ms_per_tick / 1000.0;
+        double gbps = (2.0 * (double)bytes) / seconds / 1e9; //read + write bytes
+
+        total += gbps;
+        if (gbps > best) best = gbps;
+    }
+
+    //read a byte back so the copies cannot be optimized away
+    volatile char sink = dst[bytes - 1];
+    (void)sink;
+
+    *best_gbps = best;
+    *mean_gbps = total / runs;
+
+    _aligned_free(src);
+    _aligned_free(dst);
     return 1;
 }
 
